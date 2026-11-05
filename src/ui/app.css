@@ -1,0 +1,121 @@
+:root {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #fff;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+section {
+  border-top: 1px solid #ccc;
+  margin-top: 1.5rem;
+  padding-top: 0.5rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+}
+
+input[type='number'] {
+  width: 5em;
+}
+
+button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #1a4f8b;
+  border-radius: 4px;
+  background: #1a4f8b;
+  color: #fff;
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 3px solid #f2a900;
+  outline-offset: 2px;
+}
+
+.note {
+  color: #444;
+  font-size: 0.9rem;
+}
+
+.good::before {
+  content: '✓ ';
+  color: #17692c;
+  font-weight: bold;
+}
+
+.bad {
+  color: #a1160a;
+}
+
+.checks {
+  list-style: none;
+  padding-left: 0;
+}
+
+.checks .bad::before {
+  content: '✗ ';
+  font-weight: bold;
+}
+
+.block {
+  display: block;
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  font: inherit;
+}
+
+.preview {
+  white-space: pre-wrap;
+  font-size: 96px;
+  line-height: normal;
+  border: 1px solid #ccc;
+  padding: 0.25rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.compare {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.compare figure {
+  margin: 0;
+  flex: 1 1 380px;
+}
+
+.compare img {
+  width: 100%;
+  border: 1px solid #ccc;
+  background: #fff;
+}
+
+/* Tint the traced output so it's easy to tell apart from the original. */
+.compare img.traced {
+  background: #eef6ff;
+}
+
+pre {
+  max-height: 300px;
+  overflow: auto;
+  background: #f4f4f4;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+}
