@@ -137,8 +137,13 @@ export const UNITS = {
   xHeight: 480,
   baseline: 0,
   descender: -250,
-  bottom: -300,
+  // Extra room below the descender guide so long tails (g, j, p, q, y) don't get clipped.
+  bottom: -400,
 } as const
+
+/** Resolution of the canonical page image the scanner warps every page to. */
+export const CANONICAL_DPI = 300
+export const PX_PER_PT = CANONICAL_DPI / PT_PER_IN
 
 export interface CellGeometry {
   index: number

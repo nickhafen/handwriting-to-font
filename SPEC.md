@@ -107,11 +107,11 @@ tests/
 - Below it is the **writing area** with guide lines: cap line, x-height (dashed), **baseline** (solid, slightly heavier), and descender line.
 - **All cell borders and guides are printed in light "non-photo" blue** (around `#A4DDED`, lighter than 80% luminance) so thresholding removes them. Only the markers and the ID strip are black.
 - Leave an inset margin (~0.05 in) inside each cell border that the extractor ignores.
-- **Built (v1):** 7 columns × 8 rows (56 cells), each about 1.04 × 1.075 in. Label strip 0.2 in. The writing area is the cell below the label strip minus the 0.05 in inset on all sides (about 0.94 × 0.775 in); that exact rectangle maps to +900…−300 font units. Each section of the charset starts on a new row; unused cells aren't drawn.
+- **Built (v1):** 7 columns × 8 rows (56 cells), each about 1.04 × 1.075 in. Label strip 0.2 in. The writing area is the cell below the label strip minus the 0.05 in inset on all sides (about 0.94 × 0.775 in); that exact rectangle maps to +900…−400 font units. Each section of the charset starts on a new row; unused cells aren't drawn.
 
 ### Vertical mapping (writing area → font units)
 - `unitsPerEm = 1000`. The baseline maps to y = 0.
-- Suggested guide positions in font units: cap line 700, x-height 480, descender line −250. The top of the writing area is about +900 and the bottom about −300.
+- Suggested guide positions in font units: cap line 700, x-height 480, descender line −250. The top of the writing area is about +900 and the bottom about −400 (was −300; lowered at the M1 gate for more tail room).
 - **Use one constant scale (px → units) for every cell.** Never scale or center glyphs one at a time. Relative size and baseline position come from where the writer put the ink.
 
 ### Charset (v1)
@@ -257,7 +257,8 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 | 2026-11-05 | M0 GATE passed: test OTF installed on Windows and rendered correctly in Word (holes, no clipping) | User confirmed |
 | 2026-11-05 | Same 7.25 × 10 in marker box on Letter and A4, centered | One geometry for both paper sizes; the scanner needs no paper-size setting |
 | 2026-11-05 | 7 × 8 grid of ~1.04 × 1.075 in cells instead of ~0.75 × 1.0 in | 103 characters fit on 2 pages with letters alone on page 1 (52 of 56 cells); spec prefers bigger cells |
-| 2026-11-05 | The font-unit range +900…−300 maps to the writing area *inside* the inset | Otherwise the inset would crop off the descender line (−250) |
+| 2026-11-05 | The font-unit range +900…−400 maps to the writing area *inside* the inset | Otherwise the inset would crop off the descender line (−250) |
 | 2026-11-05 | Page-ID codec lives in `core/template/pageIdCodec.ts` (not `scan/pageId.ts`) | Shared by the generator and the reader; `scan/pageId.ts` will do only the pixel sampling |
+| 2026-11-05 | M1 GATE: user approved the printed template with more tail room. Writing-area bottom moved from −300 to −400 units (descender guide stays at −250); still template v1 because no real templates were filled yet | Tails needed more space below the line |
 | 2026-11-05 | `pdfjs-dist` added as a dev dependency at M1 (listed for M5) | Rasterizes the template for visual checks now, and for synthetic scan fixtures in M2 |
 | 2026-11-05 | opentype.js has no `exports` map: plain Node resolves its CommonJS build, where named imports fail. Vite/Vitest use the ES build and are fine | Node-only scripts (e.g. fixture generators) must run through Vite with `ssr.noExternal: ['opentype.js']` |
