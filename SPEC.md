@@ -36,7 +36,7 @@ A free, browser-only web app, hosted on GitHub Pages, that turns a filled-in han
 | Font building | `opentype.js` | Writes CFF-flavored OTF |
 | Storage | IndexedDB via `idb-keyval` | Autosave the current project |
 | Heavy work | Web Worker | Keep the UI responsive while processing and tracing |
-| Tests | Vitest (unit) + Playwright (end-to-end in a real browser) | |
+| Tests | Vitest (unit) + Playwright (end-to-end in a real browser) | `npm test` (unit), `npm run test:e2e` (Playwright). Locally Playwright uses the installed Chrome; CI installs Chromium |
 | Deploy | GitHub Actions → GitHub Pages | `actions/upload-pages-artifact` + `actions/deploy-pages` |
 
 Check each dependency's current version and license when adding it. Ask before adding any dependency that isn't listed here.
@@ -210,6 +210,7 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 ### M2: Scan processing + review grid
 - Loading, thresholding, markers, warping, page ID, cells, and cleaning in the worker. Show the review grid with raw cell bitmaps.
 - Add the synthetic fixtures and end-to-end tests.
+- **Done (2026-11-05):** worker pipeline, Upload step (drag-and-drop, per-file status, page picker fallback, re-upload replaces), Review grid (baseline/x-height overlays; empty, clipped, check-size and fallback badges; click for original vs cleaned). Unit tests run the pipeline on Node-drawn synthetic photos; Playwright runs 6 browser-made fixtures (scans and tilted/shaded/noisy/upside-down/sideways photos) plus a full UI upload test. Fixture harness: `dev/fixtures.html`.
 
 ### M3: Tracing + font build + preview
 - Potrace, contour conversion, winding, metrics, build, validation, and the Preview & download step.
@@ -262,3 +263,11 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 | 2026-11-05 | M1 GATE: user approved the printed template with more tail room. Writing-area bottom moved from −300 to −400 units (descender guide stays at −250); still template v1 because no real templates were filled yet | Tails needed more space below the line |
 | 2026-11-05 | `pdfjs-dist` added as a dev dependency at M1 (listed for M5) | Rasterizes the template for visual checks now, and for synthetic scan fixtures in M2 |
 | 2026-11-05 | opentype.js has no `exports` map: plain Node resolves its CommonJS build, where named imports fail. Vite/Vitest use the ES build and are fine | Node-only scripts (e.g. fixture generators) must run through Vite with `ssr.noExternal: ['opentype.js']` |
+| 2026-11-05 | Grayscale = brightest RGB channel, not luminance | The light-blue guides (#A4DDED) become 237/255 and drop out; with luminance they would be 0.82 gray, close to the ink cutoff |
+| 2026-11-05 | Marker candidates: size range, orientation-free aspect (covariance eigenvalues), and solidity vs the convex hull (≥ 0.8); pick the candidate **farthest from the image center** in each quadrant | Bounding-box fill fails for tilted squares; "largest per quadrant" picked a filled-in letter in testing |
+| 2026-11-05 | Markers are found on a copy shrunk to ~1600 px; the warp samples the full-resolution image | Fast detection, full detail in the canonical 300 DPI page |
+| 2026-11-05 | Cell threshold = 0.6 × the cell's 95th-percentile brightness, then speck removal (12 px) | Simple and robust per cell; guides at ~0.93 × paper never count as ink |
+| 2026-11-05 | Page ID trusted only if it decodes to a known page of this template version with confidence ≥ 0.25; otherwise the user picks the page | Avoids silently assigning a page wrongly |
+| 2026-11-05 | "Suspicious" compares letters/digits with the median letter/digit ink area (< 0.12× or > 4×); punctuation is only flagged when too large | A period is legitimately tiny |
+| 2026-11-05 | `core/project.ts` assembles per-glyph review status (incl. curly-quote fallbacks) from the scanned pages | Pure and unit-testable; the UI only renders it |
+| 2026-11-05 | Fixtures write characters in Segoe Print / Ink Free / Comic Sans (whichever exists), shrunk to fit the writing area | Handwriting-like system fonts; CI (Linux) falls back to another font, so assertions use tolerances and compare photos against the clean scan |

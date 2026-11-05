@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 m0-output
 out
+tests/fixtures/synthetic
+test-results
+playwright-report

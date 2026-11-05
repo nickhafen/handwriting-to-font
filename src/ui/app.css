@@ -148,3 +148,169 @@ legend {
 section.pending h2 {
   color: #555;
 }
+
+.warn {
+  color: #8a5300;
+}
+
+h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.dropzone {
+  border: 2px dashed #8a9bb0;
+  border-radius: 8px;
+  padding: 1.25rem;
+  text-align: center;
+  background: #f7f9fc;
+}
+
+.dropzone.dragging {
+  border-color: #1a4f8b;
+  background: #e8f0fb;
+}
+
+.uploads {
+  padding-left: 1.25rem;
+}
+
+.uploads li {
+  margin-bottom: 0.4rem;
+}
+
+.uploads li.superseded {
+  color: #666;
+}
+
+.tips {
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.glyph-grid {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+}
+
+.glyph {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px;
+  background: #fff;
+  color: #1a1a1a;
+  border: 1px solid #c5ccd6;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.glyph:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.glyph.selected {
+  border-color: #1a4f8b;
+  box-shadow: 0 0 0 2px #1a4f8b;
+}
+
+.glyph-char {
+  font-size: 0.8rem;
+  color: #555;
+  text-align: left;
+}
+
+.glyph canvas,
+.glyph-blank {
+  width: 100%;
+  aspect-ratio: 281 / 233;
+  display: block;
+  background: #fff;
+}
+
+.glyph-blank {
+  background: repeating-linear-gradient(45deg, #f3f3f3, #f3f3f3 6px, #fff 6px, #fff 12px);
+}
+
+.badges {
+  min-height: 1.1em;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.badge {
+  font-size: 0.68rem;
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+
+.badge.bad {
+  background: #fde2e0;
+  color: #8f1409;
+}
+
+.badge.warn {
+  background: #fff0cc;
+  color: #6b4200;
+}
+
+.badge.info {
+  background: #e3eefb;
+  color: #17406f;
+}
+
+.swatch {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  vertical-align: middle;
+  border-top: 2px solid;
+  margin-left: 0.4rem;
+}
+
+.swatch.baseline {
+  border-color: rgba(214, 40, 40, 0.75);
+}
+
+.swatch.xheight {
+  border-top-style: dashed;
+  border-color: rgba(30, 110, 200, 0.6);
+}
+
+.detail {
+  border: 1px solid #c5ccd6;
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  background: #fafbfd;
+}
+
+.detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.detail-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.detail-images figure {
+  margin: 0.5rem 0 0;
+}
+
+.detail-images canvas {
+  width: 281px;
+  max-width: 100%;
+  border: 1px solid #ccc;
+}
