@@ -119,3 +119,32 @@ pre {
   padding: 0.5rem;
   font-size: 0.8rem;
 }
+
+button.secondary {
+  background: #fff;
+  color: #1a4f8b;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+fieldset {
+  border: none;
+  padding: 0;
+  margin: 0.5rem 0 1rem;
+}
+
+legend {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.instructions li {
+  margin-bottom: 0.25rem;
+}
+
+section.pending h2 {
+  color: #555;
+}

@@ -15,7 +15,7 @@ export async function loadPreviewFont(buffer: ArrayBuffer): Promise<string> {
   return family
 }
 
-export function downloadBlob(data: ArrayBuffer, fileName: string, type: string): void {
+export function downloadBlob(data: BlobPart, fileName: string, type: string): void {
   const url = URL.createObjectURL(new Blob([data], { type }))
   const a = document.createElement('a')
   a.href = url
