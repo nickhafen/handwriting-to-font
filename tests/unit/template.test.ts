@@ -129,3 +129,24 @@ describe('generateTemplatePdf', () => {
     expect(height).toBeCloseTo(PAGE_SIZES[size].height, 1)
   })
 })
+
+describe('styles and redo sheets', () => {
+  it('numbers each style’s pages after the Regular ones', async () => {
+    const { pageIndexOf, slotOf } = await import('../../src/core/template/styles')
+    expect(pageIndexOf({ style: 'regular', page: 1 })).toBe(1)
+    expect(pageIndexOf({ style: 'bold', page: 0 })).toBe(2)
+    expect(pageIndexOf({ style: 'boldItalic', page: 1 })).toBe(7)
+    for (let i = 0; i < 8; i++) expect(pageIndexOf(slotOf(i)!)).toBe(i)
+    expect(slotOf(8)).toBeNull()
+  })
+
+  it('prints only the pages that hold redo characters', async () => {
+    const bytes = await generateTemplatePdf('letter', { sheets: [{ style: 'regular', only: ['A', 'g'] }, { style: 'bold', only: ['%'] }] })
+    const doc = await PDFDocument.load(bytes)
+    expect(doc.getPageCount()).toBe(2) // Regular page 1 and Bold page 2
+  })
+
+  it('refuses to print an empty redo sheet', async () => {
+    await expect(generateTemplatePdf('letter', { sheets: [{ style: 'regular', only: [] }] })).rejects.toThrow()
+  })
+})

@@ -21,11 +21,24 @@ export interface FontBuildInput {
   spacing: SpacingSettings
   /** Advance width of the space glyph, in font units. */
   spaceWidth: number
+  /** Style within the family. Default: Regular, weight 400, upright. */
+  style?: FontStyle
 }
+
+export interface FontStyle {
+  /** Style name (nameID 2): Regular, Bold, Italic or Bold Italic, so Windows links the family. */
+  name: string
+  weight: number
+  /** Degrees, negative = leaning right (the OpenType convention). Sets the italic flags. */
+  italicAngle: number
+}
+
+export const REGULAR_STYLE: FontStyle = { name: 'Regular', weight: 400, italicAngle: 0 }
 
 export interface BuiltFont {
   buffer: ArrayBuffer
   familyName: string
+  styleName: string
 }
 
 /**
@@ -65,6 +78,7 @@ function notdefGlyph(): Glyph {
 }
 
 export function buildFont(input: FontBuildInput): BuiltFont {
+  const style = input.style ?? REGULAR_STYLE
   const glyphs: Glyph[] = [notdefGlyph()]
   glyphs.push(new Glyph({ name: 'space', unicode: 0x20, advanceWidth: Math.round(input.spaceWidth) }))
 
@@ -84,17 +98,18 @@ export function buildFont(input: FontBuildInput): BuiltFont {
 
   const font = new Font({
     familyName: input.familyName,
-    styleName: 'Regular',
+    styleName: style.name,
     unitsPerEm: UNITS_PER_EM,
     ascender: DEFAULT_ASCENDER,
     descender: DEFAULT_DESCENDER,
-    weightClass: 400,
+    weightClass: style.weight,
+    italicAngle: style.italicAngle,
     glyphs,
     tables: {
       os2: {
         // 0 = installable embedding, so Word can embed the font in documents.
         fsType: 0,
-        usWeightClass: 400,
+        usWeightClass: style.weight,
         sTypoAscender: DEFAULT_ASCENDER,
         sTypoDescender: DEFAULT_DESCENDER,
         sTypoLineGap: 0,
@@ -105,5 +120,5 @@ export function buildFont(input: FontBuildInput): BuiltFont {
     },
   })
 
-  return { buffer: font.toArrayBuffer(), familyName: input.familyName }
+  return { buffer: font.toArrayBuffer(), familyName: input.familyName, styleName: style.name }
 }

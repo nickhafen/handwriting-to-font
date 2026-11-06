@@ -60,6 +60,7 @@ declare module 'opentype.js' {
     designer?: string
     version?: string
     weightClass?: number
+    italicAngle?: number
     tables?: { os2?: Record<string, number> }
   }
 

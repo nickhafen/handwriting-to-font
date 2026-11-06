@@ -131,11 +131,19 @@ test('upload both pages through the UI and review the glyphs', async ({ page }) 
 
   // Clicking a glyph shows the original scan next to the cleaned ink.
   await page.locator('[data-testid="glyph"][data-char="g"]').click()
-  await expect(page.getByRole('region', { name: 'Details for g' })).toContainText('Original scan')
+  const drawer = page.getByRole('dialog', { name: 'Details for g' })
+  await expect(drawer).toContainText('Original scan')
+  // The drawer opens without moving the page.
+  const y = await page.evaluate(() => window.scrollY)
+  await drawer.getByRole('button', { name: 'Next letter' }).click()
+  await expect(page.getByRole('dialog', { name: 'Details for h' })).toBeVisible()
+  expect(await page.evaluate(() => window.scrollY)).toBe(y)
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
-  // Re-uploading page 1 replaces the earlier copy.
+  // Re-uploading a full page 1 replaces every character on it.
   await page.getByTestId('upload-input').setInputFiles([{ ...files[0], name: 'ui-p1-again.jpg' }])
-  await expect(page.getByText('Replaced by a newer upload of this page.')).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText('Every character has been replaced by a newer upload.')).toBeVisible({ timeout: 60_000 })
   await expect(page.getByTestId('glyph')).toHaveCount(103)
 })
 

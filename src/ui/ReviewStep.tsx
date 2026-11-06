@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ReviewGlyph } from '../core/project'
+import { usable, type GlyphsByStyle, type ReviewGlyph } from '../core/project'
+import { DEFAULT_ADJUST, sameAdjust, type InkAdjust } from '../core/scan/adjust'
 import type { CellResult } from '../core/scan/cells'
 import { PX_PER_PT, UNITS, UNITS_PER_PT } from '../core/template/layout'
-import type { InkAdjust } from '../core/scan/adjust'
+import { PAGE_NAMES, STYLES, styleInfo, type StyleId } from '../core/template/styles'
 import { GlyphOutline } from './GlyphOutline'
 import { InkControls } from './InkControls'
-import { PAGE_NAMES } from './UploadStep'
+import { overrideKey } from './useProject'
 
 /** Pixel row in a cell crop where a font-unit height falls. */
 const unitsToRow = (u: number) => ((UNITS.top - u) / UNITS_PER_PT) * PX_PER_PT
@@ -57,36 +58,63 @@ function CellCanvas({ cell, mode, displayWidth }: { cell: CellResult; mode: 'ink
   return <canvas ref={ref} aria-hidden="true" />
 }
 
-function badges(g: ReviewGlyph, adjusted = false): { text: string; kind: 'bad' | 'warn' | 'info' }[] {
-  const out: { text: string; kind: 'bad' | 'warn' | 'info' }[] = []
+interface Badge {
+  text: string
+  kind: 'bad' | 'warn' | 'info' | 'redo'
+}
+
+function badges(g: ReviewGlyph, adjusted: boolean, redo: boolean): Badge[] {
+  const out: Badge[] = []
   if (g.empty) out.push({ text: 'empty', kind: 'bad' })
   if (g.clipped) out.push({ text: 'clipped', kind: 'warn' })
   if (g.suspicious) out.push({ text: 'check size', kind: 'warn' })
   if (adjusted) out.push({ text: 'adjusted', kind: 'info' })
+  if (redo) out.push({ text: 'redo', kind: 'redo' })
   if (g.usesFallback) out.push({ text: `uses ${g.info.fallbackFrom}`, kind: 'info' })
+  if (g.generated) out.push({ text: 'generated', kind: 'info' })
   return out
 }
 
-function describe(g: ReviewGlyph): string {
-  const b = badges(g).map((x) => x.text)
-  return `${g.info.char}${g.info.hint ? ` (${g.info.hint})` : ''}${b.length ? `: ${b.join(', ')}` : ''}`
+function describe(g: ReviewGlyph, b: Badge[]): string {
+  const t = b.map((x) => x.text)
+  return `${g.info.char}${g.info.hint ? ` (${g.info.hint})` : ''}${t.length ? `: ${t.join(', ')}` : ''}`
 }
 
 interface Props {
-  glyphs: ReviewGlyph[]
+  glyphs: GlyphsByStyle
+  uploadedStyles: Set<StyleId>
   adjust: InkAdjust
   onAdjust: (a: InkAdjust) => void
   overrides: Record<string, InkAdjust>
-  onOverride: (char: string, a: InkAdjust | null) => void
+  onOverride: (style: StyleId, char: string, a: InkAdjust | null) => void
+  onApplyToAll: (a: InkAdjust) => void
+  redo: Set<string>
+  onToggleRedo: (style: StyleId, char: string) => void
   busy: boolean
 }
 
-export function ReviewStep({ glyphs, adjust, onAdjust, overrides, onOverride, busy }: Props) {
+export function ReviewStep(p: Props) {
+  const { glyphs, uploadedStyles, adjust, overrides, redo, busy } = p
+  const [style, setStyle] = useState<StyleId>('regular')
   const [selected, setSelected] = useState<string | null>(null)
-  const anyPage = glyphs.some((g) => !g.pageMissing)
-  const sel = glyphs.find((g) => g.info.char === selected && g.cell)
+  const drawerRef = useRef<HTMLDivElement>(null)
 
-  if (!anyPage) {
+  // Styles worth showing: uploaded ones, plus any that have generated glyphs.
+  const visible = STYLES.filter((s) => uploadedStyles.has(s.id) || glyphs[s.id].some(usable))
+  const current = visible.some((s) => s.id === style) ? style : 'regular'
+  const list = glyphs[current]
+  const selIndex = list.findIndex((g) => g.info.char === selected)
+  const sel = selIndex >= 0 ? list[selIndex] : undefined
+
+  // Esc closes the drawer.
+  useEffect(() => {
+    if (!sel) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setSelected(null)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sel])
+
+  if (!uploadedStyles.size) {
     return (
       <section aria-labelledby="step-review" className="pending">
         <h2 id="step-review">3. Review your letters</h2>
@@ -96,117 +124,197 @@ export function ReviewStep({ glyphs, adjust, onAdjust, overrides, onOverride, bu
   }
 
   const counts = {
-    ready: glyphs.filter((g) => g.cell && !g.empty).length,
-    empty: glyphs.filter((g) => g.empty).length,
-    flagged: glyphs.filter((g) => g.clipped || g.suspicious).length,
-    missing: glyphs.filter((g) => g.pageMissing).length,
+    ready: list.filter(usable).length,
+    empty: list.filter((g) => g.empty && !g.generated).length,
+    flagged: list.filter((g) => g.clipped || g.suspicious).length,
+    missing: list.filter((g) => g.pageMissing && !g.generated).length,
   }
+  const isAdjusted = (g: ReviewGlyph) => !!overrides[overrideKey(g.style, g.info.char)]
+  const isRedo = (g: ReviewGlyph) => redo.has(overrideKey(g.style, g.info.char))
+  const step = (d: number) => {
+    // Next/previous glyph that has something to show.
+    for (let i = selIndex + d; i >= 0 && i < list.length; i += d) {
+      if (list[i].cell) return setSelected(list[i].info.char)
+    }
+  }
+  const globalChanged = !sameAdjust(adjust, DEFAULT_ADJUST)
 
   return (
     <section aria-labelledby="step-review">
       <h2 id="step-review">3. Review your letters</h2>
+
+      {visible.length > 1 && (
+        <div className="tabs" role="tablist" aria-label="Font style">
+          {visible.map((s) => (
+            <button
+              key={s.id}
+              role="tab"
+              aria-selected={s.id === current}
+              className={s.id === current ? 'tab active' : 'tab'}
+              onClick={() => {
+                setStyle(s.id)
+                setSelected(null)
+              }}
+            >
+              {s.label}
+              {!uploadedStyles.has(s.id) && <span className="muted"> (generated)</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
       <p data-testid="review-summary">
-        {counts.ready} of {glyphs.length} characters ready
+        {counts.ready} of {list.length} characters ready
         {counts.empty > 0 && `, ${counts.empty} empty`}
         {counts.flagged > 0 && `, ${counts.flagged} to check`}
         {counts.missing > 0 && `, ${counts.missing} on a page not uploaded yet`}.
       </p>
       <p className="note">
-        <span className="swatch baseline" /> baseline <span className="swatch xheight" /> x-height. Letters are drawn from their traced
-        outlines. Click one to compare it with the original scan and adjust it on its own.
+        <span className="swatch baseline" /> baseline <span className="swatch xheight" /> x-height. Click a letter to
+        compare it with the scan, adjust it, or mark it for a redo sheet.
       </p>
-      <details className="ink-panel" open>
-        <summary>Ink settings for all letters</summary>
+      <details className="ink-panel">
+        <summary>
+          Ink settings for all letters{globalChanged && <span className="badge info">changed from default</span>}
+        </summary>
         <p className="note">
           If parts of letters are missing, raise <b>Ink sensitivity</b>. For bolder letters, raise <b>Stroke thickness</b>.
           Letters you have adjusted individually keep their own settings.
         </p>
-        <InkControls idPrefix="all" value={adjust} onChange={onAdjust} />
+        <InkControls idPrefix="all" value={adjust} onChange={p.onAdjust} />
+        <button className="secondary" disabled={!globalChanged} onClick={() => p.onAdjust({ ...DEFAULT_ADJUST })}>
+          Reset to defaults
+        </button>
       </details>
       <p className="note busy" role="status" aria-live="polite" data-testid="retrace-status">
         {busy ? 'Updating letters…' : ' '}
       </p>
-      {sel?.cell && (
-        <div className="detail" role="region" aria-label={`Details for ${sel.info.char}`}>
-          <div className="detail-head">
-            <b>{describe(sel)}</b>
-            <button className="secondary" onClick={() => setSelected(null)}>
-              Close
-            </button>
-          </div>
-          <div className="detail-images">
-            <figure>
-              <CellCanvas cell={sel.cell} mode="gray" displayWidth={281} />
-              <figcaption>Original scan</figcaption>
-            </figure>
-            <figure>
-              <CellCanvas cell={sel.cell} mode="ink" displayWidth={281} />
-              <figcaption>Cleaned ink</figcaption>
-            </figure>
-            <figure>
-              <GlyphOutline contours={sel.cell.contours} className="outline-large" />
-              <figcaption>Traced outline ({sel.cell.contours.length} contours)</figcaption>
-            </figure>
-          </div>
-          <div className="letter-adjust">
-            <h4>
-              Adjust this letter only{overrides[sel.info.char] && <span className="badge info">adjusted</span>}
-            </h4>
-            {sel.usesFallback && (
-              <p className="note">
-                This blank character is using {sel.info.fallbackFrom} instead. Adjusting it reprocesses its own (blank) box.
-              </p>
-            )}
-            <InkControls
-              idPrefix={`letter-${sel.info.unicode}`}
-              value={overrides[sel.info.char] ?? adjust}
-              onChange={(a) => onOverride(sel.info.char, a)}
-            />
-            <button className="secondary" disabled={!overrides[sel.info.char]} onClick={() => onOverride(sel.info.char, null)}>
-              Use the all-letters settings
-            </button>
-          </div>
-          {sel.cell.yMaxUnits !== null && (
-            <p className="note">
-              Ink runs from {Math.round(sel.cell.yMinUnits!)} to {Math.round(sel.cell.yMaxUnits)} font units (baseline =
-              0, x-height = {UNITS.xHeight}).
-            </p>
-          )}
-        </div>
-      )}
+
       {[0, 1].map((pageIndex) => (
         <div key={pageIndex}>
           <h3>{PAGE_NAMES[pageIndex]}</h3>
           <ul className="glyph-grid" data-testid={`glyph-grid-${pageIndex}`}>
-            {glyphs
+            {list
               .filter((g) => g.pageIndex === pageIndex)
-              .map((g) => (
-                <li key={g.info.char}>
-                  <button
-                    className={`glyph${g.info.char === selected ? ' selected' : ''}`}
-                    disabled={!g.cell}
-                    onClick={() => setSelected(g.info.char)}
-                    aria-label={describe(g)}
-                    data-testid="glyph"
-                    data-char={g.info.char}
-                    data-ink={g.cell?.inkArea ?? 0}
-                    data-state={g.pageMissing ? 'missing' : g.empty ? 'empty' : 'ok'}
-                  >
-                    <span className="glyph-char">{g.info.char}</span>
-                    {g.cell && !g.empty ? <GlyphOutline contours={g.cell.contours} /> : <span className="glyph-blank" />}
-                    <span className="badges">
-                      {badges(g, !!overrides[g.info.char]).map((b) => (
-                        <span key={b.text} className={`badge ${b.kind}`}>
-                          {b.text}
-                        </span>
-                      ))}
-                    </span>
-                  </button>
-                </li>
-              ))}
+              .map((g) => {
+                const b = badges(g, isAdjusted(g), isRedo(g))
+                return (
+                  <li key={g.info.char}>
+                    <button
+                      className={`glyph${g.info.char === selected ? ' selected' : ''}`}
+                      disabled={!g.cell}
+                      onClick={() => setSelected(g.info.char)}
+                      aria-label={describe(g, b)}
+                      aria-haspopup="dialog"
+                      data-testid="glyph"
+                      data-char={g.info.char}
+                      data-ink={g.cell?.inkArea ?? 0}
+                      data-state={g.pageMissing ? 'missing' : g.empty ? 'empty' : 'ok'}
+                    >
+                      <span className="glyph-char">{g.info.char}</span>
+                      {usable(g) ? <GlyphOutline contours={g.outline} /> : <span className="glyph-blank" />}
+                      <span className="badges">
+                        {b.map((x) => (
+                          <span key={x.text} className={`badge ${x.kind}`}>
+                            {x.text}
+                          </span>
+                        ))}
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
           </ul>
         </div>
       ))}
+
+      {sel?.cell && (
+        <>
+          {/* Room so the last rows can scroll above the drawer. */}
+          <div className="drawer-spacer" aria-hidden="true" />
+          <div className="drawer" ref={drawerRef} role="dialog" aria-modal="false" aria-label={`Details for ${sel.info.char}`}>
+            <div className="drawer-head">
+              <b className="drawer-title">
+                {styleInfo(sel.style).label} “{sel.info.char}”{sel.info.hint ? ` (${sel.info.hint})` : ''}
+              </b>
+              <span className="badges">
+                {badges(sel, isAdjusted(sel), isRedo(sel)).map((x) => (
+                  <span key={x.text} className={`badge ${x.kind}`}>
+                    {x.text}
+                  </span>
+                ))}
+              </span>
+              <span className="spacer" />
+              <button className="secondary" onClick={() => step(-1)} disabled={selIndex <= 0} aria-label="Previous letter">
+                ‹ Prev
+              </button>
+              <button className="secondary" onClick={() => step(1)} disabled={selIndex >= list.length - 1} aria-label="Next letter">
+                Next ›
+              </button>
+              <button className="secondary" onClick={() => setSelected(null)}>
+                Close
+              </button>
+            </div>
+            <div className="drawer-body">
+              <div className="detail-images">
+                <figure>
+                  <CellCanvas cell={sel.cell} mode="gray" displayWidth={220} />
+                  <figcaption>{sel.generated ? 'Regular scan' : 'Original scan'}</figcaption>
+                </figure>
+                <figure>
+                  <CellCanvas cell={sel.cell} mode="ink" displayWidth={220} />
+                  <figcaption>Cleaned ink</figcaption>
+                </figure>
+                <figure>
+                  <GlyphOutline contours={sel.outline} className="outline-large" />
+                  <figcaption>Outline in the font ({sel.outline.length} contours)</figcaption>
+                </figure>
+              </div>
+              <div className="letter-adjust">
+                {sel.generated ? (
+                  <p className="note">
+                    Generated from your Regular “{sel.info.char}” ({sel.generated}). Adjust the Regular letter, change the
+                    generation settings in step 4, or upload a written {styleInfo(sel.style).label} set.
+                  </p>
+                ) : (
+                  <>
+                    {sel.usesFallback && (
+                      <p className="note">
+                        This blank character is using {sel.info.fallbackFrom} instead. Adjusting it reprocesses its own
+                        (blank) box.
+                      </p>
+                    )}
+                    <InkControls
+                      idPrefix={`letter-${sel.info.unicode}`}
+                      value={overrides[overrideKey(sel.style, sel.info.char)] ?? adjust}
+                      onChange={(a) => p.onOverride(sel.style, sel.info.char, a)}
+                    />
+                    <div className="row">
+                      <button
+                        className="secondary"
+                        disabled={!isAdjusted(sel)}
+                        onClick={() => p.onOverride(sel.style, sel.info.char, null)}
+                      >
+                        Revert to default
+                      </button>
+                      <button
+                        className="secondary"
+                        onClick={() => p.onApplyToAll(overrides[overrideKey(sel.style, sel.info.char)] ?? adjust)}
+                      >
+                        Apply to all letters
+                      </button>
+                    </div>
+                  </>
+                )}
+                <label className="redo-toggle">
+                  <input type="checkbox" checked={isRedo(sel)} onChange={() => p.onToggleRedo(sel.style, sel.info.char)} />{' '}
+                  Mark for a redo sheet (print it in step 1)
+                </label>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   )
 }

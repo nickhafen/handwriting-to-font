@@ -19,6 +19,7 @@ import {
   type Rect,
 } from './layout'
 import { encodePageId } from './pageIdCodec'
+import { pageIndexOf, styleInfo, type StyleId } from './styles'
 
 const BLACK = rgb(0, 0, 0)
 const WHITE = rgb(1, 1, 1)
@@ -105,7 +106,19 @@ function drawCell(c: Canvas, index: number, info: CharInfo, font: PDFFont) {
   c.hline(x0, x1, g.guides.descender, 0.5)
 }
 
-export async function generateTemplatePdf(size: PageSizeId): Promise<Uint8Array> {
+export interface TemplateSheet {
+  style: StyleId
+  /** Only draw boxes for these characters (a redo sheet). Pages with none are skipped. */
+  only?: string[]
+}
+
+export interface TemplateOptions {
+  /** Which sets to print, in order. Default: the full Regular template. */
+  sheets?: TemplateSheet[]
+}
+
+export async function generateTemplatePdf(size: PageSizeId, options: TemplateOptions = {}): Promise<Uint8Array> {
+  const sheets = options.sheets ?? [{ style: 'regular' }]
   const doc = await PDFDocument.create()
   doc.setTitle('Handwriting to Font — template')
   doc.setCreator('Handwriting to Font')
@@ -119,34 +132,41 @@ export async function generateTemplatePdf(size: PageSizeId): Promise<Uint8Array>
     throw new Error('Template box does not fit the page with 0.5 in margins')
   }
 
-  for (const tp of TEMPLATE_PAGES) {
-    const page = doc.addPage([paper.width, paper.height])
-    const c = new Canvas(page, origin.x, origin.y, paper.height)
+  for (const sheet of sheets) {
+    const only = sheet.only ? new Set(sheet.only) : null
+    const style = styleInfo(sheet.style)
+    for (const tp of TEMPLATE_PAGES) {
+      const cells = tp.cells.map((info) => (info && (!only || only.has(info.char)) ? info : null))
+      if (!cells.some(Boolean)) continue
+      const page = doc.addPage([paper.width, paper.height])
+      const c = new Canvas(page, origin.x, origin.y, paper.height)
 
-    // Corner markers; the top-left one has a white hole so the scanner can tell which way is up.
-    for (const r of Object.values(MARKERS)) c.fill(r)
-    c.fill({ ...MARKER_HOLE_RECT, x: MARKERS.tl.x + MARKER_HOLE_RECT.x, y: MARKERS.tl.y + MARKER_HOLE_RECT.y }, WHITE)
+      // Corner markers; the top-left one has a white hole so the scanner can tell which way is up.
+      for (const r of Object.values(MARKERS)) c.fill(r)
+      c.fill({ ...MARKER_HOLE_RECT, x: MARKERS.tl.x + MARKER_HOLE_RECT.x, y: MARKERS.tl.y + MARKER_HOLE_RECT.y }, WHITE)
 
-    // Page-ID strip: filled squares are 1s; empty ones get a light outline so the row looks intentional.
-    encodePageId({ version: TEMPLATE_VERSION, pageIndex: tp.index }).forEach((bit, i) => {
-      if (bit) c.fill(ID_SQUARES[i])
-      else c.stroke(ID_SQUARES[i], GUIDE, 0.5)
-    })
+      // Page-ID strip (version + style/page): filled squares are 1s; empty ones get a light outline.
+      encodePageId({ version: TEMPLATE_VERSION, pageIndex: pageIndexOf({ style: sheet.style, page: tp.index }) }).forEach((bit, i) => {
+        if (bit) c.fill(ID_SQUARES[i])
+        else c.stroke(ID_SQUARES[i], GUIDE, 0.5)
+      })
 
-    // Header.
-    const title = `Handwriting to Font  ·  Page ${tp.index + 1} of ${TEMPLATE_PAGES.length} (${PAGE_TITLES[tp.index]})  ·  Template v${TEMPLATE_VERSION}`
-    c.text(title, HEADER.x, HEADER.titleBaseline, bold, HEADER.titleSize, HEADER_GRAY)
-    c.text(
-      'Print at 100% / Actual size. Use a black felt-tip pen. Sit each character on the solid baseline.',
-      HEADER.x,
-      HEADER.noteBaseline,
-      font,
-      HEADER.noteSize,
-      HEADER_GRAY,
-    )
+      // Header.
+      const set = sheet.style === 'regular' ? '' : `  ·  ${style.label} set`
+      const kind = only ? '  ·  Redo sheet' : ''
+      const title = `Handwriting to Font  ·  Page ${tp.index + 1} of ${TEMPLATE_PAGES.length} (${PAGE_TITLES[tp.index]})${set}${kind}  ·  Template v${TEMPLATE_VERSION}`
+      const fit = (s: string, f: PDFFont, size: number) => Math.min(size, (size * BOX.width) / f.widthOfTextAtSize(s, size))
+      c.text(title, HEADER.x, HEADER.titleBaseline, bold, fit(title, bold, HEADER.titleSize), HEADER_GRAY)
+      const note = only
+        ? 'Print at 100%. Write only in the boxes shown; your new letters replace the earlier ones.'
+        : sheet.style === 'regular'
+          ? 'Print at 100% / Actual size. Use a black felt-tip pen. Sit each character on the solid baseline.'
+          : `Print at 100% / Actual size. Write every character in your ${style.label.toLowerCase()} style.`
+      c.text(note, HEADER.x, HEADER.noteBaseline, font, fit(note, font, HEADER.noteSize), HEADER_GRAY)
 
-    tp.cells.forEach((info, i) => info && drawCell(c, i, info, font))
+      cells.forEach((info, i) => info && drawCell(c, i, info, font))
+    }
   }
-
+  if (doc.getPageCount() === 0) throw new Error('No characters to print')
   return doc.save()
 }

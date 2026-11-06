@@ -99,6 +99,7 @@ tests/
 ### Page-ID strip
 - A row of 8 small squares (~0.15 in) between the top two markers. Filled = 1.
 - Bits 0–3 are the template version and bits 4–7 are the page index.
+- **Extended (2026-11-06, no geometry change, still v1):** page index = styleIndex × 2 + page, styles in order Regular, Bold, Italic, Bold Italic (indices 0–7). Printed Regular pages (0, 1) are unaffected.
 - If reading fails, fall back to a manual page-picker in the UI.
 
 ### Cells
@@ -236,6 +237,14 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
   4. Compare the scan with a rendering of the blank template (pdf.js, already a dev dependency) and subtract the expected guide pixels.
   - **Progress (2026-11-06):** per-cell lighting flattening fixed the shadow flooding on the user's grayscale scan, and detected guide rows are now guarded. Remaining: on grayscale prints the baseline is about as dark as ink, so it still bleeds into some lowercase letters (m, n, s, u, z). Test scan: `samples/grayscale p1 (shadow).jpg` (local only).
 
+### Done early (2026-11-06, user requests)
+- **Font styles:** Regular, Bold, Italic, Bold Italic. Each can be written on its own template set (style chosen in step 1, detected from the page ID) or generated from Regular: Bold by re-tracing Regular with thicker strokes (+1…4 px), Italic and Bold Italic by slanting (4–20°). Written glyphs win per character. Downloads are one family with a shared build code and correct style-linking (nameID 2, usWeightClass, fsSelection, macStyle, post.italicAngle).
+- **Redo workflow:** uploads of the same style/page merge, newest non-blank box wins; blank boxes keep earlier versions. Step 3 can mark characters for redo; step 1 prints a redo sheet with only those boxes (same positions and page IDs). Marks clear when a new upload supplies the character. Uploads show how many characters they supply and can be removed.
+- **Review drawer:** clicking a letter opens a fixed bottom drawer (page doesn't scroll) with scan / ink / outline, per-letter sliders, Revert to default, Apply to all letters, Mark for redo, Prev/Next, Esc to close.
+- **Preview:** buttons insert – — § • … ‘ ’ “ ”.
+- **Dev only:** "Load samples (dev)" loads `samples/*color*` via a dev-server-only Vite plugin; never in builds.
+- **Still to do:** saving the project (IndexedDB autosave) so redo sheets work across sessions without re-uploading the originals.
+
 ### M6: Variants and ligatures (phase 3)
 - **Start with a feasibility check:** can `opentype.js` write GSUB `calt` (contextual alternates) and `liga` lookups that Word and browsers honor? If not, write up options for the user, such as fontTools via Pyodide, before building anything.
 - Note for the user docs: Word turns contextual alternates off by default. They're enabled under Font → Advanced → "Use Contextual Alternates".
@@ -296,3 +305,7 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 | 2026-11-06 | Before thresholding, each cell is divided by a local paper-brightness estimate (block max over 24 px blocks, spread 3×3, smoothed) | Hysteresis alone flooded shaded areas on the user's grayscale/shadow scan; flattening restores shaded paper to white |
 | 2026-11-06 | Guide guard also applies to rows that look like a printed line (≥ 35% of the width faint-but-not-dark), ±2 rows | On the user's sideways page-2 scan, guides sat more than 4 px from the predicted rows and grew into } and $ |
 | 2026-11-06 | Tuned against the user's real scans in `samples/` (color p1, color p2 sideways, grayscale p1 with shadow). They stay local: `samples/` and `tests/fixtures/real/` are gitignored | It's the user's handwriting and the repo may become public; ask before committing any real scans |
+| 2026-11-06 | Styles encoded in the page-ID page index (style × 2 + page) instead of a new template version | Keeps already-printed Regular templates valid; 4 bits allow 8 pages = 4 styles × 2 |
+| 2026-11-06 | Generated Bold = Regular cells re-traced with thicker strokes in the worker; generated Italic = outline slant at build time | Reuses the ink pipeline (handles holes and joins naturally) and costs nothing for italics. Cursive written sets still can't join letters (needs contextual alternates, M6) |
+| 2026-11-06 | Re-uploading a page merges instead of replacing: per box, the newest upload with writing wins | Makes partial redo sheets and "just rewrite a few boxes" work with no extra encoding |
+| 2026-11-06 | "Revert to default" in the drawer removes the letter's own settings; "Apply to all letters" makes them the all-letters settings and clears every per-letter override | Matches the user's request; the global panel shows when it differs from the defaults |

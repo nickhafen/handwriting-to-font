@@ -79,3 +79,59 @@ describe('building a font from reviewed glyphs', () => {
     expect(report.stats.familyName).toBe('My Handwriting AB12')
   })
 })
+
+describe('merging uploads and generated styles', () => {
+  it('lets a later upload replace only the characters written on it', async () => {
+    const { mergeUploads } = await import('../../src/core/project')
+    const first = page(0)
+    const redo = page(0)
+    redo.cells = redo.cells.map((c, i) => (TEMPLATE_PAGES[0].cells[i]?.char === 'A' ? c : cell(i, 0)))
+    const m = mergeUploads(0, [
+      { key: 1, scan: first },
+      { key: 2, scan: redo },
+    ])!
+    expect(m.used.get(1)).toBe(51)
+    expect(m.used.get(2)).toBe(1)
+    const aIndex = TEMPLATE_PAGES[0].cells.findIndex((c) => c?.char === 'A')
+    expect(m.scan.cells[aIndex]).toBe(redo.cells[aIndex])
+    expect(m.scan.cells[aIndex + 1]).toBe(first.cells[aIndex + 1])
+  })
+
+  it('generates italic by slanting and keeps written glyphs first', async () => {
+    const { effectiveGlyphs, slantContours, DEFAULT_GENERATE } = await import('../../src/core/project')
+    const { ellipse } = await import('../../src/core/font/m0TestGlyphs')
+    const ring = [ellipse(200, 300, 100, 300, true)]
+    const withOutline = (c: CellResult): CellResult => (c.empty ? c : { ...c, contours: ring })
+    const reg = page(0)
+    reg.cells = reg.cells.map(withOutline)
+    const written = {
+      regular: assembleGlyphs(new Map([[0, reg]]), 'regular'),
+      bold: assembleGlyphs(new Map(), 'bold'),
+      italic: assembleGlyphs(new Map(), 'italic'),
+      boldItalic: assembleGlyphs(new Map(), 'boldItalic'),
+    }
+    const eff = effectiveGlyphs(written, null, DEFAULT_GENERATE)
+    const a = eff.italic.find((g) => g.info.char === 'A')!
+    expect(a.generated).toBe('slanted')
+    expect(a.outline).toEqual(slantContours(ring, DEFAULT_GENERATE.slant))
+    // Bold isn't available without the thickened Regular set, so Bold Italic isn't either.
+    expect(eff.bold.find((g) => g.info.char === 'A')!.generated).toBeUndefined()
+    expect(eff.boldItalic.find((g) => g.info.char === 'A')!.generated).toBeUndefined()
+    // Nothing is generated when turned off.
+    expect(effectiveGlyphs(written, null, { ...DEFAULT_GENERATE, italic: false }).italic.some((g) => g.generated)).toBe(false)
+  })
+
+  it('builds style-linked fonts with the right flags', async () => {
+    const { buildProjectFont, DEFAULT_FONT_SETTINGS } = await import('../../src/core/project')
+    const { parse } = await import('opentype.js')
+    const { ellipse } = await import('../../src/core/font/m0TestGlyphs')
+    const reg = page(0)
+    reg.cells = reg.cells.map((c) => (c.empty ? c : { ...c, contours: [ellipse(200, 300, 100, 300, true)] }))
+    const glyphs = assembleGlyphs(new Map([[0, reg]]), 'boldItalic')
+    const f = parse(buildProjectFont(glyphs, DEFAULT_FONT_SETTINGS, 'ZZ99', 'boldItalic', 12).buffer)
+    expect(f.names.fontSubfamily?.en ?? f.names.windows?.fontSubfamily?.en).toBe('Bold Italic')
+    expect(f.tables.os2.usWeightClass).toBe(700)
+    expect(f.tables.os2.fsSelection & 0x21).toBe(0x21)
+    expect(f.tables.post.italicAngle).toBe(-12)
+  })
+})

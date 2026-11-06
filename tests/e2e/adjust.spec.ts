@@ -39,6 +39,7 @@ test('ink controls re-trace all letters, and per-letter settings override them',
   const b0 = await inkOf(page, 'B')
 
   // Lowest sensitivity loses the faint lower halves of every letter.
+  await page.locator('.ink-panel summary').click()
   await page.locator('#all-sensitivity').fill('0')
   await expect.poll(() => inkOf(page, 'x'), { timeout: 20_000 }).toBeLessThan(x0 * 0.8)
   await page.locator('#all-sensitivity').fill('70')
@@ -58,7 +59,7 @@ test('ink controls re-trace all letters, and per-letter settings override them',
   expect(aAdjusted).toBeGreaterThan(a0 * 1.15)
 
   // Reset the A: it follows the all-letters settings again (thickness +1).
-  await page.getByRole('button', { name: 'Use the all-letters settings' }).click()
+  await page.getByRole('button', { name: 'Revert to default' }).click()
   await expect.poll(() => inkOf(page, 'A'), { timeout: 20_000 }).toBeLessThan(aAdjusted)
   await expect(page.locator('[data-testid="glyph"][data-char="A"]')).not.toContainText('adjusted')
   expect(await inkOf(page, 'A')).toBeGreaterThan(a0)

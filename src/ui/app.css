@@ -434,3 +434,155 @@ h3 {
   min-height: 1.4em;
   margin: 0.25rem 0;
 }
+
+/* ---- M3+ review drawer, tabs, styles ---- */
+
+.muted {
+  color: #666;
+}
+
+.row.centered {
+  justify-content: center;
+}
+
+button.link {
+  background: none;
+  border: none;
+  color: #1a4f8b;
+  text-decoration: underline;
+  padding: 0 0.25rem;
+  margin-left: 0.5rem;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid #c5ccd6;
+  margin-bottom: 0.5rem;
+}
+
+.tab {
+  background: #f3f5f8;
+  color: #1a1a1a;
+  border: 1px solid #c5ccd6;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+}
+
+.tab.active {
+  background: #fff;
+  color: #1a4f8b;
+  font-weight: 600;
+  position: relative;
+  top: 1px;
+}
+
+.badge.redo {
+  background: #efe3fb;
+  color: #4c1d7a;
+}
+
+.drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 55vh;
+  overflow: auto;
+  background: #fafbfd;
+  border-top: 2px solid #1a4f8b;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.drawer-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: #eef2f8;
+  border-bottom: 1px solid #c5ccd6;
+}
+
+.drawer-title {
+  font-size: 1.05rem;
+}
+
+.drawer-head .spacer {
+  flex: 1;
+}
+
+.drawer-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  padding: 0.5rem 1rem 1rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.drawer-body .detail-images canvas {
+  width: 220px;
+}
+
+.drawer-body .outline-large {
+  width: 220px;
+}
+
+.drawer-body .letter-adjust {
+  flex: 1 1 360px;
+  border-top: none;
+  margin-top: 0;
+}
+
+.drawer-spacer {
+  height: 55vh;
+}
+
+.redo-toggle {
+  display: block;
+  margin-top: 0.75rem;
+}
+
+.redo-panel,
+.styles-panel {
+  border: 1px solid #c5ccd6;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin: 1rem 0 0.5rem;
+  background: #fafbfd;
+}
+
+.redo-panel summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.redo-chars {
+  font-size: 1.15rem;
+  letter-spacing: 0.15em;
+  margin-right: 0.75rem;
+}
+
+.styles-panel legend {
+  font-weight: 600;
+}
+
+.insert-row {
+  margin: 0.4rem 0;
+  gap: 0.3rem;
+}
+
+.char-button {
+  min-width: 2.2rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 1.05rem;
+}
+
+.style-preview h3 {
+  margin-bottom: 0.25rem;
+}

@@ -1,22 +1,8 @@
 import { useRef, useState } from 'react'
 import type { ScanStage } from '../core/scan/processPage'
 import { TEMPLATE_PAGES } from '../core/template/charset'
-import { TEMPLATE_VERSION } from '../core/template/layout'
-
-export interface Upload {
-  key: number
-  fileName: string
-  status: 'processing' | 'done' | 'error'
-  stage?: ScanStage
-  error?: string
-  tips?: string[]
-  /** Page index read from the ID strip, or chosen by the user when the strip can't be read. */
-  pageIndex: number | null
-  /** The ID strip was unreadable or doubtful; ask the user. */
-  needsPagePick: boolean
-  /** Replaced by a later upload of the same page. */
-  superseded: boolean
-}
+import { slotLabel, STYLES, type Slot } from '../core/template/styles'
+import type { Upload } from './useProject'
 
 const STAGE_TEXT: Record<ScanStage, string> = {
   loading: 'Opening image…',
@@ -27,17 +13,34 @@ const STAGE_TEXT: Record<ScanStage, string> = {
   tracing: 'Tracing outlines…',
 }
 
-export const PAGE_NAMES = ['Page 1 (letters)', 'Page 2 (numbers and punctuation)']
+const ALL_SLOTS: Slot[] = STYLES.flatMap((s) => TEMPLATE_PAGES.map((p) => ({ style: s.id, page: p.index })))
+const slotValue = (s: Slot) => `${s.style}/${s.page}`
 
 interface Props {
   uploads: Upload[]
   onFiles: (files: File[]) => void
-  onPickPage: (key: number, pageIndex: number) => void
+  onPickSlot: (key: number, slot: Slot) => void
+  onRemove: (key: number) => void
 }
 
-export function UploadStep({ uploads, onFiles, onPickPage }: Props) {
+/** Dev server only: load the images in ./samples whose names contain "color" (or all of them if none do). */
+async function loadSamples(): Promise<File[]> {
+  const base = `${import.meta.env.BASE_URL}__samples/`
+  const names: string[] = await (await fetch(base)).json()
+  const color = names.filter((n) => /color/i.test(n))
+  const chosen = color.length ? color : names
+  return Promise.all(
+    chosen.map(async (n) => {
+      const blob = await (await fetch(base + encodeURIComponent(n))).blob()
+      return new File([blob], n, { type: blob.type })
+    }),
+  )
+}
+
+export function UploadStep({ uploads, onFiles, onPickSlot, onRemove }: Props) {
   const input = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
+  const [sampleError, setSampleError] = useState<string | null>(null)
 
   const accept = (list: FileList | null) => {
     const files = Array.from(list ?? []).filter((f) => /^image\/(png|jpeg)$/.test(f.type) || /\.(png|jpe?g)$/i.test(f.name))
@@ -61,7 +64,23 @@ export function UploadStep({ uploads, onFiles, onPickPage }: Props) {
         }}
       >
         <p>Drag and drop your scans or photos here (JPG or PNG), one image per page.</p>
-        <button onClick={() => input.current?.click()}>Choose files…</button>
+        <div className="row centered">
+          <button onClick={() => input.current?.click()}>Choose files…</button>
+          {import.meta.env.DEV && (
+            <button
+              className="secondary"
+              data-testid="load-samples"
+              onClick={() => {
+                setSampleError(null)
+                loadSamples()
+                  .then((files) => (files.length ? onFiles(files) : setSampleError('No images in the samples folder.')))
+                  .catch((e) => setSampleError(`Couldn't load samples: ${e}`))
+              }}
+            >
+              Load samples (dev)
+            </button>
+          )}
+        </div>
         <input
           ref={input}
           type="file"
@@ -74,34 +93,43 @@ export function UploadStep({ uploads, onFiles, onPickPage }: Props) {
             e.target.value = ''
           }}
         />
+        {sampleError && <p className="bad">{sampleError}</p>}
       </div>
-      <p className="note">Uploading a page again replaces the earlier copy of that page.</p>
+      <p className="note">
+        Uploading a page again only replaces the characters written on the new copy; blank boxes keep the earlier
+        version. That's how redo sheets work.
+      </p>
 
       {uploads.length > 0 && (
         <ul className="uploads" aria-live="polite">
           {uploads.map((u) => (
-            <li key={u.key} className={u.superseded ? 'superseded' : ''} data-testid="upload-row" data-status={u.status}>
+            <li key={u.key} data-testid="upload-row" data-status={u.status}>
               <b>{u.fileName}</b>
               {': '}
               {u.status === 'processing' && <span>{u.stage ? STAGE_TEXT[u.stage] : 'Waiting…'}</span>}
-              {u.status === 'done' && u.superseded && <span>Replaced by a newer upload of this page.</span>}
-              {u.status === 'done' && !u.superseded && !u.needsPagePick && u.pageIndex !== null && (
-                <span className="good">{PAGE_NAMES[u.pageIndex] ?? `Page ${u.pageIndex + 1}`} detected</span>
+              {u.status === 'done' && u.slot && !u.needsPagePick && (
+                <span className={u.used ? 'good' : 'muted'}>
+                  {slotLabel(u.slot)} detected.{' '}
+                  {u.used ? `Supplies ${u.used} character${u.used === 1 ? '' : 's'}.` : 'Every character has been replaced by a newer upload.'}
+                </span>
               )}
               {u.status === 'done' && u.needsPagePick && (
                 <label>
                   <span className="warn">Couldn't read the page number. Which page is this? </span>
                   <select
-                    value={u.pageIndex ?? ''}
-                    onChange={(e) => onPickPage(u.key, Number(e.target.value))}
+                    value={u.slot ? slotValue(u.slot) : ''}
+                    onChange={(e) => {
+                      const slot = ALL_SLOTS.find((s) => slotValue(s) === e.target.value)
+                      if (slot) onPickSlot(u.key, slot)
+                    }}
                     aria-label={`Page for ${u.fileName}`}
                   >
                     <option value="" disabled>
                       Choose…
                     </option>
-                    {TEMPLATE_PAGES.map((p) => (
-                      <option key={p.index} value={p.index}>
-                        {PAGE_NAMES[p.index]}
+                    {ALL_SLOTS.map((s) => (
+                      <option key={slotValue(s)} value={slotValue(s)}>
+                        {slotLabel(s)}
                       </option>
                     ))}
                   </select>
@@ -119,11 +147,15 @@ export function UploadStep({ uploads, onFiles, onPickPage }: Props) {
                   )}
                 </div>
               )}
+              {u.status !== 'processing' && (
+                <button className="link" onClick={() => onRemove(u.key)} aria-label={`Remove ${u.fileName}`}>
+                  Remove
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
-      <p className="note">Template version {TEMPLATE_VERSION}.</p>
     </section>
   )
 }

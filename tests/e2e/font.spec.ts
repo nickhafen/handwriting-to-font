@@ -1,5 +1,5 @@
 // End-to-end: upload synthetic scans -> preview -> download the OTF -> re-parse it in Node and check it.
-import { expect, test } from '@playwright/test'
+import { expect, test, type Download } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import * as opentype from 'opentype.js'
 import { commandsToContours } from '../../src/core/font/pathCommands'
@@ -35,10 +35,39 @@ test('build, preview and download a font from two uploaded pages', async ({ page
   expect(family).toContain('hw-preview-')
 
   // Download and re-parse.
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download OTF' }).click()])
-  expect(download.suggestedFilename()).toMatch(/^MyHandwriting[0-9A-Z]{4}-Regular\.otf$/)
-  const bytes = readFileSync(await download.path())
-  const font = ot.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+  // Bold and italics are generated from Regular by default, so four files download with one build code.
+  const downloads: Download[] = []
+  page.on('download', (d) => downloads.push(d))
+  await page.getByRole('button', { name: 'Download 4 font files' }).click()
+  await expect.poll(() => downloads.length, { timeout: 10_000 }).toBe(4)
+  const names = downloads.map((d) => d.suggestedFilename())
+  expect(names[0]).toMatch(/^MyHandwriting[0-9A-Z]{4}-Regular\.otf$/)
+  const code = names[0].slice('MyHandwriting'.length, 'MyHandwriting'.length + 4)
+  expect(names).toEqual(['Regular', 'Bold', 'Italic', 'BoldItalic'].map((s) => `MyHandwriting${code}-${s}.otf`))
+  const parseDownload = async (d: Download) => {
+    const bytes = readFileSync(await d.path())
+    return ot.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+  }
+  const font = await parseDownload(downloads[0])
+
+  // The other styles share the family name and carry the right style flags, so Word links them.
+  const styles = await Promise.all(downloads.slice(1).map(parseDownload))
+  for (const [f, name, weight, italic] of [
+    [styles[0], 'Bold', 700, false],
+    [styles[1], 'Italic', 400, true],
+    [styles[2], 'Bold Italic', 700, true],
+  ] as const) {
+    expect(f.names.fontFamily?.en ?? f.names.windows?.fontFamily?.en).toBe(`My Handwriting ${code}`)
+    expect(f.names.fontSubfamily?.en ?? f.names.windows?.fontSubfamily?.en).toBe(name)
+    expect(f.tables.os2.usWeightClass).toBe(weight)
+    expect((f.tables.os2.fsSelection & 1) === 1).toBe(italic) // ITALIC bit
+    expect((f.tables.os2.fsSelection & 32) === 32).toBe(weight === 700) // BOLD bit
+    expect(f.tables.post.italicAngle < 0).toBe(italic)
+  }
+  // Generated bold is heavier; generated italic leans right.
+  const inkWidth = (f: typeof font, ch: string) => f.charToGlyph(ch).getBoundingBox().x2 - f.charToGlyph(ch).getBoundingBox().x1
+  expect(inkWidth(styles[0], 'l')).toBeGreaterThan(inkWidth(font, 'l') + 5)
+  expect(inkWidth(styles[1], 'l')).toBeGreaterThan(inkWidth(font, 'l') + 60)
 
   expect(font.tables.cff).toBeDefined()
   expect(font.names.fontFamily?.en ?? font.names.windows?.fontFamily?.en).toMatch(/^My Handwriting [0-9A-Z]{4}$/)

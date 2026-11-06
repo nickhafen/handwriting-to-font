@@ -1,72 +1,114 @@
-// Upload, scan and ink-adjustment state for the app. Re-traces only the cells a
-// settings change affects, and ignores results that a newer change has overtaken.
+// Upload, scan, ink-adjustment and style state for the app. Re-traces only the
+// cells a settings change affects, and ignores results that a newer change has overtaken.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { assembleGlyphs, type ReviewGlyph } from '../core/project'
+import {
+  assembleGlyphs,
+  DEFAULT_GENERATE,
+  effectiveGlyphs,
+  mergeUploads,
+  type GenerateSettings,
+  type GlyphsByStyle,
+} from '../core/project'
 import { DEFAULT_ADJUST, sameAdjust, type InkAdjust } from '../core/scan/adjust'
 import type { CellResult } from '../core/scan/cells'
 import type { PageScan } from '../core/scan/processPage'
 import { TEMPLATE_PAGES } from '../core/template/charset'
 import { CELLS_PER_PAGE, TEMPLATE_VERSION } from '../core/template/layout'
+import { slotOf, STYLE_IDS, type Slot, type StyleId } from '../core/template/styles'
 import { retraceCells, ScanFailure, scanFile } from './scanClient'
-import type { Upload } from './UploadStep'
 
 /** Below this the page-ID reading is too doubtful to trust without asking. */
 const MIN_ID_CONFIDENCE = 0.25
 const GLOBAL_DEBOUNCE_MS = 400
 const LETTER_DEBOUNCE_MS = 250
+const BOLD_DEBOUNCE_MS = 500
+
+export interface Upload {
+  key: number
+  fileName: string
+  status: 'processing' | 'done' | 'error'
+  stage?: import('../core/scan/processPage').ScanStage
+  error?: string
+  tips?: string[]
+  /** Style and page read from the ID strip, or chosen by the user when it can't be read. */
+  slot: Slot | null
+  /** The ID strip was unreadable or doubtful; ask the user. */
+  needsPagePick: boolean
+  /** Characters this upload currently supplies (later uploads of the same page can replace some). */
+  used: number
+}
 
 let nextKey = 1
 
-/** Mark older uploads of the same page as replaced. */
-function supersede(uploads: Upload[]): Upload[] {
-  const latest = new Map<number, number>()
-  for (const u of uploads) if (u.status === 'done' && u.pageIndex !== null) latest.set(u.pageIndex, u.key)
-  return uploads.map((u) => ({ ...u, superseded: u.status === 'done' && u.pageIndex !== null && latest.get(u.pageIndex) !== u.key }))
-}
+export const overrideKey = (style: StyleId, char: string) => `${style}:${char}`
 
-/** The character in a grid cell of a page, if any. */
-const charAt = (pageIndex: number | null, cellIndex: number) =>
-  pageIndex === null ? undefined : TEMPLATE_PAGES[pageIndex]?.cells[cellIndex]?.char
-
+/** The character in a grid cell of a template page, if any. */
+const charAt = (page: number, cellIndex: number) => TEMPLATE_PAGES[page]?.cells[cellIndex]?.char
 const ALL_CELLS = Array.from({ length: CELLS_PER_PAGE }, (_, i) => i)
+const charCells = (page: number) => ALL_CELLS.filter((i) => charAt(page, i) !== undefined)
 
 export interface ProjectState {
   uploads: Upload[]
-  glyphs: ReviewGlyph[]
+  /** Written glyphs per style (what was scanned). */
+  written: GlyphsByStyle
+  /** Glyphs that go into each style's font (written, or generated from Regular). */
+  glyphs: GlyphsByStyle
+  /** Styles that have at least one uploaded page. */
+  uploadedStyles: Set<StyleId>
   adjust: InkAdjust
   overrides: Record<string, InkAdjust>
-  /** Number of re-trace jobs still running. */
+  generate: GenerateSettings
+  /** Characters marked for a redo sheet, as overrideKey(style, char). */
+  redo: Set<string>
+  /** Number of background re-trace jobs still running. */
   busy: number
   addFiles(files: File[]): void
-  pickPage(key: number, pageIndex: number): void
+  removeUpload(key: number): void
+  pickSlot(key: number, slot: Slot): void
   setAdjust(a: InkAdjust): void
-  /** Set (or with null, clear) the ink settings for one character. */
-  setOverride(char: string, a: InkAdjust | null): void
+  /** Set (or with null, clear) the ink settings for one character of one style. */
+  setOverride(style: StyleId, char: string, a: InkAdjust | null): void
+  /** Make `a` the setting for every letter: sets the global settings and clears all overrides. */
+  applyToAll(a: InkAdjust): void
+  setGenerate(g: GenerateSettings): void
+  toggleRedo(style: StyleId, char: string): void
+  clearRedo(): void
 }
+
+const emptyByStyle = (): GlyphsByStyle => ({
+  regular: assembleGlyphs(new Map(), 'regular'),
+  bold: assembleGlyphs(new Map(), 'bold'),
+  italic: assembleGlyphs(new Map(), 'italic'),
+  boldItalic: assembleGlyphs(new Map(), 'boldItalic'),
+})
 
 export function useProject(): ProjectState {
   const [uploads, setUploads] = useState<Upload[]>([])
   const [scans, setScans] = useState<Map<number, PageScan>>(new Map())
+  const [boldScans, setBoldScans] = useState<Map<number, PageScan>>(new Map())
   const [adjust, setAdjustState] = useState<InkAdjust>(DEFAULT_ADJUST)
   const [overrides, setOverrides] = useState<Record<string, InkAdjust>>({})
+  const [generate, setGenerate] = useState<GenerateSettings>(DEFAULT_GENERATE)
+  const [redo, setRedo] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(0)
 
   // Latest values for async callbacks.
-  const ref = useRef({ uploads, scans, adjust, overrides })
-  ref.current = { uploads, scans, adjust, overrides }
+  const ref = useRef({ uploads, scans, adjust, overrides, generate })
+  ref.current = { uploads, scans, adjust, overrides, generate }
   /** Global settings each upload's cells were last processed with. */
   const appliedGlobal = useRef(new Map<number, InkAdjust>())
   const letterTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const boldSignature = useRef('')
 
   const updateUpload = useCallback(
-    (key: number, patch: Partial<Upload>) => setUploads((list) => supersede(list.map((u) => (u.key === key ? { ...u, ...patch } : u)))),
+    (key: number, patch: Partial<Upload>) => setUploads((list) => list.map((u) => (u.key === key ? { ...u, ...patch } : u))),
     [],
   )
 
-  /** Settings that should apply to a cell right now. */
-  const wanted = (pageIndex: number | null, cellIndex: number): InkAdjust => {
-    const ch = charAt(pageIndex, cellIndex)
-    return (ch && ref.current.overrides[ch]) || ref.current.adjust
+  /** Settings that should apply to a cell of a page right now. */
+  const wanted = (slot: Slot | null, cellIndex: number): InkAdjust => {
+    const ch = slot ? charAt(slot.page, cellIndex) : undefined
+    return (slot && ch && ref.current.overrides[overrideKey(slot.style, ch)]) || ref.current.adjust
   }
 
   /** Re-process some cells of one upload with `adj`; keep only results that are still wanted. */
@@ -77,12 +119,12 @@ export function useProject(): ProjectState {
     try {
       const crops = cellIndices.map((i) => scan.cells[i]).map(({ index, width, height, gray }) => ({ index, width, height, gray }))
       const results = await retraceCells(crops, adj)
-      const pageIndex = ref.current.uploads.find((u) => u.key === key)?.pageIndex ?? null
+      const slot = ref.current.uploads.find((u) => u.key === key)?.slot ?? null
       setScans((m) => {
         const s = m.get(key)
         if (!s) return m
         const cells: CellResult[] = s.cells.slice()
-        for (const r of results) if (sameAdjust(wanted(pageIndex, r.index), adj)) cells[r.index] = r
+        for (const r of results) if (sameAdjust(wanted(slot, r.index), adj)) cells[r.index] = r
         return new Map(m).set(key, { ...s, cells })
       })
     } finally {
@@ -92,36 +134,46 @@ export function useProject(): ProjectState {
 
   /** Bring every overridden character on an upload's page up to date. */
   const applyOverrides = useCallback(
-    (key: number, pageIndex: number) => {
-      for (const [ch, adj] of Object.entries(ref.current.overrides)) {
-        const cellIndex = TEMPLATE_PAGES[pageIndex].cells.findIndex((c) => c?.char === ch)
+    (key: number, slot: Slot) => {
+      for (const [k, adj] of Object.entries(ref.current.overrides)) {
+        const [style, ch] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)]
+        if (style !== slot.style) continue
+        const cellIndex = TEMPLATE_PAGES[slot.page].cells.findIndex((c) => c?.char === ch)
         if (cellIndex >= 0) void retrace(key, [cellIndex], adj)
       }
     },
     [retrace],
   )
 
+  /** A page arrived: clear redo marks for the characters it contains. */
+  const clearRedoFor = (slot: Slot, scan: PageScan) =>
+    setRedo((r) => {
+      const next = new Set(r)
+      for (const i of charCells(slot.page)) if (!scan.cells[i].empty) next.delete(overrideKey(slot.style, charAt(slot.page, i)!))
+      return next.size === r.size ? r : next
+    })
+
   const addFiles = useCallback(
     (files: File[]) => {
       for (const file of files) {
         const key = nextKey++
         const adj = ref.current.adjust
-        setUploads((list) => [...list, { key, fileName: file.name, status: 'processing', pageIndex: null, needsPagePick: false, superseded: false }])
+        setUploads((list) => [...list, { key, fileName: file.name, status: 'processing', slot: null, needsPagePick: false, used: 0 }])
         scanFile(file, adj, (stage) => updateUpload(key, { stage }))
           .then((scan) => {
             appliedGlobal.current.set(key, adj)
             setScans((m) => new Map(m).set(key, scan))
             const id = scan.pageId
-            const trusted =
-              id !== null && id.version === TEMPLATE_VERSION && id.pageIndex < TEMPLATE_PAGES.length && scan.idConfidence >= MIN_ID_CONFIDENCE
-            updateUpload(key, { status: 'done', pageIndex: trusted ? id.pageIndex : null, needsPagePick: !trusted })
-            // setScans/updateUpload land before the next tick; then catch up on any settings changed meanwhile.
+            const slot = id && id.version === TEMPLATE_VERSION && scan.idConfidence >= MIN_ID_CONFIDENCE ? slotOf(id.pageIndex) : null
+            updateUpload(key, { status: 'done', slot, needsPagePick: !slot })
+            if (slot) clearRedoFor(slot, scan)
+            // State lands before the next tick; then catch up on any settings changed meanwhile.
             setTimeout(() => {
               if (!sameAdjust(adj, ref.current.adjust)) {
                 appliedGlobal.current.set(key, ref.current.adjust)
                 void retrace(key, ALL_CELLS, ref.current.adjust)
               }
-              if (trusted) applyOverrides(key, id.pageIndex)
+              if (slot) applyOverrides(key, slot)
             })
           })
           .catch((err: unknown) => {
@@ -133,25 +185,35 @@ export function useProject(): ProjectState {
     [applyOverrides, retrace, updateUpload],
   )
 
-  const pickPage = useCallback(
-    (key: number, pageIndex: number) => {
-      updateUpload(key, { pageIndex })
-      setTimeout(() => applyOverrides(key, pageIndex))
+  const removeUpload = useCallback((key: number) => {
+    setUploads((list) => list.filter((u) => u.key !== key))
+    setScans((m) => {
+      const next = new Map(m)
+      next.delete(key)
+      return next
+    })
+  }, [])
+
+  const pickSlot = useCallback(
+    (key: number, slot: Slot) => {
+      updateUpload(key, { slot })
+      setTimeout(() => applyOverrides(key, slot))
     },
     [applyOverrides, updateUpload],
   )
 
-  // Global settings changed: re-trace every non-overridden cell of each active upload (debounced).
+  // Global settings changed: re-trace every non-overridden cell of each upload (debounced).
   useEffect(() => {
     const timer = setTimeout(() => {
       for (const u of ref.current.uploads) {
-        if (u.status !== 'done' || u.superseded) continue
+        if (u.status !== 'done') continue
         const last = appliedGlobal.current.get(u.key)
         if (last && sameAdjust(last, adjust)) continue
         appliedGlobal.current.set(u.key, adjust)
         const cells = ALL_CELLS.filter((i) => {
-          const ch = charAt(u.pageIndex, i)
-          return u.pageIndex === null || (ch !== undefined && !ref.current.overrides[ch])
+          if (!u.slot) return true
+          const ch = charAt(u.slot.page, i)
+          return ch !== undefined && !ref.current.overrides[overrideKey(u.slot.style, ch)]
         })
         void retrace(u.key, cells, adjust)
       }
@@ -159,40 +221,174 @@ export function useProject(): ProjectState {
     return () => clearTimeout(timer)
   }, [adjust, retrace])
 
-  const setOverride = useCallback(
-    (char: string, a: InkAdjust | null) => {
-      setOverrides((o) => {
-        const next = { ...o }
-        if (a) next[char] = a
-        else delete next[char]
-        return next
-      })
-      const timers = letterTimers.current
-      clearTimeout(timers.get(char))
-      timers.set(
-        char,
-        setTimeout(() => {
-          timers.delete(char)
-          const adj = ref.current.overrides[char] ?? ref.current.adjust
-          for (const u of ref.current.uploads) {
-            if (u.status !== 'done' || u.superseded || u.pageIndex === null) continue
-            const cellIndex = TEMPLATE_PAGES[u.pageIndex].cells.findIndex((c) => c?.char === char)
-            if (cellIndex >= 0) void retrace(u.key, [cellIndex], adj)
-          }
-        }, LETTER_DEBOUNCE_MS),
-      )
+  /** Re-trace one character on every upload of its style's page. */
+  const retraceChar = useCallback(
+    (style: StyleId, char: string) => {
+      const adj = ref.current.overrides[overrideKey(style, char)] ?? ref.current.adjust
+      for (const u of ref.current.uploads) {
+        if (u.status !== 'done' || !u.slot || u.slot.style !== style) continue
+        const cellIndex = TEMPLATE_PAGES[u.slot.page].cells.findIndex((c) => c?.char === char)
+        if (cellIndex >= 0) void retrace(u.key, [cellIndex], adj)
+      }
     },
     [retrace],
   )
 
-  const pages = useMemo(() => {
-    const m = new Map<number, PageScan>()
-    for (const u of uploads) {
-      if (u.status === 'done' && !u.superseded && u.pageIndex !== null && scans.has(u.key)) m.set(u.pageIndex, scans.get(u.key)!)
-    }
-    return m
-  }, [uploads, scans])
-  const glyphs = useMemo(() => assembleGlyphs(pages), [pages])
+  const setOverride = useCallback(
+    (style: StyleId, char: string, a: InkAdjust | null) => {
+      const k = overrideKey(style, char)
+      setOverrides((o) => {
+        const next = { ...o }
+        if (a) next[k] = a
+        else delete next[k]
+        return next
+      })
+      const timers = letterTimers.current
+      clearTimeout(timers.get(k))
+      timers.set(
+        k,
+        setTimeout(() => {
+          timers.delete(k)
+          retraceChar(style, char)
+        }, LETTER_DEBOUNCE_MS),
+      )
+    },
+    [retraceChar],
+  )
 
-  return { uploads, glyphs, adjust, overrides, busy, addFiles, pickPage, setAdjust: setAdjustState, setOverride }
+  const applyToAll = useCallback((a: InkAdjust) => {
+    setOverrides({})
+    // A fresh object always re-runs the global pass, which now re-traces every letter.
+    setAdjustState({ ...a })
+    for (const u of ref.current.uploads) appliedGlobal.current.delete(u.key)
+  }, [])
+
+  const toggleRedo = useCallback((style: StyleId, char: string) => {
+    setRedo((r) => {
+      const next = new Set(r)
+      const k = overrideKey(style, char)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return next
+    })
+  }, [])
+
+  // ------------------------------------------------------------ merging -----
+
+  const merged = useMemo(() => {
+    const byStyle = new Map<StyleId, Map<number, PageScan>>(STYLE_IDS.map((s) => [s, new Map()]))
+    const used = new Map<number, number>()
+    for (const style of STYLE_IDS) {
+      for (let page = 0; page < TEMPLATE_PAGES.length; page++) {
+        const list = uploads
+          .filter((u) => u.status === 'done' && u.slot?.style === style && u.slot.page === page && scans.has(u.key))
+          .map((u) => ({ key: u.key, scan: scans.get(u.key)! }))
+        const m = mergeUploads(page, list)
+        if (!m) continue
+        byStyle.get(style)!.set(page, m.scan)
+        for (const [k, n] of m.used) used.set(k, n)
+      }
+    }
+    return { byStyle, used }
+  }, [uploads, scans])
+
+  // Keep each upload's "characters used" count in sync with the merge.
+  useEffect(() => {
+    setUploads((list) => {
+      let changed = false
+      const next = list.map((u) => {
+        const n = merged.used.get(u.key) ?? 0
+        if (n === u.used) return u
+        changed = true
+        return { ...u, used: n }
+      })
+      return changed ? next : list
+    })
+  }, [merged])
+
+  // ------------------------------------------------ Bold from Regular -------
+
+  // Re-trace the Regular pages with thicker strokes whenever anything that feeds them changes (debounced).
+  useEffect(() => {
+    const regular = uploads.filter((u) => u.status === 'done' && u.slot?.style === 'regular' && scans.has(u.key))
+    const regOverrides = Object.entries(overrides).filter(([k]) => k.startsWith('regular:'))
+    const sig = JSON.stringify([generate.bold, generate.boldAmount, regular.map((u) => u.key), adjust, regOverrides])
+    if (!generate.bold || regular.length === 0) {
+      boldSignature.current = sig
+      return
+    }
+    if (sig === boldSignature.current) return
+    const timer = setTimeout(async () => {
+      boldSignature.current = sig
+      setBusy((n) => n + 1)
+      try {
+        for (const u of regular) {
+          const scan = ref.current.scans.get(u.key)
+          if (!scan || !u.slot) continue
+          // Group cells by the settings they use, so each group is one worker request.
+          const groups = new Map<string, { adj: InkAdjust; cells: number[] }>()
+          for (const i of charCells(u.slot.page)) {
+            const a = wanted(u.slot, i)
+            const g = groups.get(JSON.stringify(a)) ?? { adj: a, cells: [] }
+            g.cells.push(i)
+            groups.set(JSON.stringify(a), g)
+          }
+          const cells = scan.cells.slice()
+          for (const { adj, cells: idx } of groups.values()) {
+            const crops = idx.map((i) => scan.cells[i]).map(({ index, width, height, gray }) => ({ index, width, height, gray }))
+            const results = await retraceCells(crops, { ...adj, thickness: adj.thickness + ref.current.generate.boldAmount })
+            for (const r of results) cells[r.index] = r
+          }
+          if (boldSignature.current !== sig) return // overtaken by a newer change
+          setBoldScans((m) => new Map(m).set(u.key, { ...scan, cells }))
+        }
+      } finally {
+        setBusy((n) => n - 1)
+      }
+    }, BOLD_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [uploads, scans, adjust, overrides, generate.bold, generate.boldAmount])
+
+  const boldFromRegular = useMemo(() => {
+    if (!generate.bold) return null
+    const pages = new Map<number, PageScan>()
+    for (let page = 0; page < TEMPLATE_PAGES.length; page++) {
+      const list = uploads
+        .filter((u) => u.status === 'done' && u.slot?.style === 'regular' && u.slot.page === page && boldScans.has(u.key))
+        .map((u) => ({ key: u.key, scan: boldScans.get(u.key)! }))
+      const m = mergeUploads(page, list)
+      if (m) pages.set(page, m.scan)
+    }
+    return pages.size ? assembleGlyphs(pages, 'regular') : null
+  }, [uploads, boldScans, generate.bold])
+
+  const written = useMemo<GlyphsByStyle>(() => {
+    const out = emptyByStyle()
+    for (const style of STYLE_IDS) out[style] = assembleGlyphs(merged.byStyle.get(style)!, style)
+    return out
+  }, [merged])
+
+  const glyphs = useMemo(() => effectiveGlyphs(written, boldFromRegular, generate), [written, boldFromRegular, generate])
+  const uploadedStyles = useMemo(() => new Set(STYLE_IDS.filter((s) => merged.byStyle.get(s)!.size > 0)), [merged])
+
+  return {
+    uploads,
+    written,
+    glyphs,
+    uploadedStyles,
+    adjust,
+    overrides,
+    generate,
+    redo,
+    busy,
+    addFiles,
+    removeUpload,
+    pickSlot,
+    setAdjust: setAdjustState,
+    setOverride,
+    applyToAll,
+    setGenerate,
+    toggleRedo,
+    clearRedo: () => setRedo(new Set()),
+  }
 }
