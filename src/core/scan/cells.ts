@@ -4,18 +4,34 @@ import type { CharInfo } from '../template/charset'
 import { CELLS_PER_PAGE, PX_PER_PT, UNITS, UNITS_PER_PT, cellGeometry } from '../template/layout'
 import { removeSpecks } from './components'
 import { crop, percentile, type GrayImage } from './image'
-import { globalThreshold } from './threshold'
+import { adjustThickness, detectGuideRows, hysteresis, normalizeBackground } from './inkMask'
 
 export interface CellSettings {
-  /** Ink is darker than this fraction of the cell's paper brightness. */
+  /** Definitely ink: darker than this fraction of the cell's paper brightness. */
   inkRatio: number
+  /** Faint ink: darker than this fraction, and connected to definite ink (hysteresis). */
+  weakRatio: number
+  /** Within a few pixels of a printed guide line, faint ink must be darker than this, so it can't follow the line. */
+  guideRatio: number
   /** Ink blobs smaller than this many pixels (at 300 DPI) are removed as specks. */
   speckArea: number
   /** A cell with less ink than this (pixels) counts as empty. */
   minInkArea: number
+  /** Pixels to thicken (+) or thin (−) every stroke on each side. */
+  thickness: number
 }
 
-export const DEFAULT_CELL_SETTINGS: CellSettings = { inkRatio: 0.6, speckArea: 12, minInkArea: 40 }
+export const DEFAULT_CELL_SETTINGS: CellSettings = {
+  inkRatio: 0.6,
+  weakRatio: 0.8,
+  guideRatio: 0.7,
+  speckArea: 12,
+  minInkArea: 40,
+  thickness: 0,
+}
+
+/** Half-height (pixels) of the band around each printed guide line where `guideRatio` applies. */
+const GUIDE_BAND = 4
 
 export interface InkBox {
   minX: number
@@ -50,18 +66,48 @@ export function rowToUnits(row: number): number {
   return UNITS.top - (row / PX_PER_PT) * UNITS_PER_PT
 }
 
+/** Font-unit height -> pixel row in a writing-area crop. */
+const unitsToRow = (u: number) => ((UNITS.top - u) / UNITS_PER_PT) * PX_PER_PT
+
+/** Rows near the printed guide lines (cap, x-height, baseline, descender) in a crop of height `h`. */
+function guideBandRows(h: number): boolean[] {
+  const rows = new Array<boolean>(h).fill(false)
+  for (const u of [UNITS.cap, UNITS.xHeight, UNITS.baseline, UNITS.descender]) {
+    const c = Math.round(unitsToRow(u))
+    for (let y = c - GUIDE_BAND; y <= c + GUIDE_BAND; y++) if (y >= 0 && y < h) rows[y] = true
+  }
+  return rows
+}
+
 export function extractCell(canonical: GrayImage, index: number, settings: CellSettings): CellResult {
   const r = cellGeometry(index).writing
   const x0 = Math.round(r.x * PX_PER_PT)
   const y0 = Math.round(r.y * PX_PER_PT)
   const w = Math.round(r.w * PX_PER_PT)
   const h = Math.round(r.h * PX_PER_PT)
-  const gray = crop(canonical, x0, y0, w, h)
+  return analyzeCell(crop(canonical, x0, y0, w, h), index, settings)
+}
 
+/** Threshold, clean and measure one cell's grayscale writing-area crop. */
+export function analyzeCell(gray: GrayImage, index: number, settings: CellSettings): CellResult {
+  const { width: w, height: h } = gray
+  // Even out shadows first, so "faint" means faint ink, not shaded paper.
+  const flat = normalizeBackground(gray)
   // Paper level from a high percentile: most of a cell is blank paper.
-  const paper = percentile(gray, 0.95)
-  const binary = globalThreshold(gray, paper * settings.inkRatio)
-  const { image: ink } = removeSpecks(binary, settings.speckArea)
+  const paper = percentile(flat, 0.95)
+  const strongCut = paper * settings.inkRatio
+  const weakCut = paper * Math.max(settings.inkRatio, settings.weakRatio)
+  // Guard the expected guide rows, plus any row that actually looks like a printed line.
+  const expected = guideBandRows(h)
+  const found = detectGuideRows(flat, strongCut, weakCut)
+  const binary = hysteresis(flat, {
+    strongCut,
+    weakCut,
+    bandCut: paper * Math.max(settings.inkRatio, settings.guideRatio),
+    bandRows: expected.map((v, y) => v || found[y]),
+  })
+  const { image: cleaned } = removeSpecks(binary, settings.speckArea)
+  const ink = adjustThickness(cleaned, settings.thickness)
 
   let inkArea = 0
   let minX = w

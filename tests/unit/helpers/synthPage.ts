@@ -20,6 +20,11 @@ export interface InkSpec {
   /** Ink spans these font units vertically (baseline = 0). */
   top: number
   bottom: number
+  /** Ink gray level (default 20). Light values imitate faint pen strokes. */
+  gray?: number
+  /** Horizontal span as fractions of the writing width (default 0.3..0.7). */
+  x0?: number
+  x1?: number
 }
 
 const GUIDE_GRAY = 237 // the brightest channel of #A4DDED
@@ -47,7 +52,9 @@ export function renderPage(pageIndex: number, dpi: number, inks: InkSpec[], marg
     const wr = cellGeometry(ink.cell).writing
     const y0 = unitsToY(wr, ink.top)
     const y1 = unitsToY(wr, ink.bottom)
-    fill({ x: wr.x + wr.w * 0.3, y: y0, w: wr.w * 0.4, h: y1 - y0 }, 20)
+    const a = ink.x0 ?? 0.3
+    const b = ink.x1 ?? 0.7
+    fill({ x: wr.x + wr.w * a, y: y0, w: wr.w * (b - a), h: y1 - y0 }, ink.gray ?? 20)
   }
   return img
 }

@@ -26,6 +26,8 @@ export interface FixtureSpec {
   /** Warm paper tint, as a photo under indoor light would have. */
   tint?: boolean
   format?: 'png' | 'jpeg'
+  /** Imitate a light pen: strokes fade from dark at the cap line to light gray at the baseline and below. */
+  faint?: boolean
   seed?: number
 }
 
@@ -54,7 +56,7 @@ async function renderTemplate(pageIndex: number, dpi: number): Promise<HTMLCanva
 }
 
 /** Write each character in its cell, sitting on the baseline, cap height on the cap line. */
-function writeCharacters(canvas: HTMLCanvasElement, pageIndex: number, dpi: number, skip: Set<string>) {
+function writeCharacters(canvas: HTMLCanvasElement, pageIndex: number, dpi: number, skip: Set<string>, faint = false) {
   const ctx = canvas.getContext('2d')!
   const s = dpi / 72
   const origin = boxOriginOnPage('letter')
@@ -84,6 +86,12 @@ function writeCharacters(canvas: HTMLCanvasElement, pageIndex: number, dpi: numb
     const cx = (origin.x + g.writing.x + g.writing.w / 2) * s
     const x = cx - (mm.actualBoundingBoxRight - mm.actualBoundingBoxLeft) / 2
     const y = (origin.y + g.guides.baseline) * s
+    if (faint) {
+      const grad = ctx.createLinearGradient(0, (origin.y + g.guides.cap) * s, 0, y)
+      grad.addColorStop(0, '#1a1a1a')
+      grad.addColorStop(1, '#b4b4b4')
+      ctx.fillStyle = grad
+    }
     ctx.fillText(info.char, x, y)
   })
 }
@@ -165,7 +173,7 @@ export async function makeFixture(spec: FixtureSpec): Promise<Blob> {
   const dpi = spec.dpi ?? 300
   await document.fonts.ready
   const page = await renderTemplate(spec.pageIndex, dpi)
-  writeCharacters(page, spec.pageIndex, dpi, new Set(spec.skip ?? []))
+  writeCharacters(page, spec.pageIndex, dpi, new Set(spec.skip ?? []), spec.faint)
   const distorted = spec.rotate || spec.skew || spec.shade || spec.noise || spec.shadow || spec.tint
   const canvas = distorted ? photograph(page, spec) : page
   const type = spec.format === 'jpeg' ? 'image/jpeg' : 'image/png'

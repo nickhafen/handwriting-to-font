@@ -224,15 +224,17 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 - The GitHub Actions workflow and Pages setup, after the user approves.
 
 ### M5: Polish (phase 2)
-- Per-glyph adjustments: scale, baseline shift, left/right sidebearings, and a "re-trace with different smoothing" option.
+- Per-glyph adjustments: scale, baseline shift, left/right sidebearings, and a "re-trace with different smoothing" option. (Ink sensitivity, stroke thickness and smoothing per letter were done early on 2026-11-06; scale, baseline shift and sidebearings remain.)
+- Save ink settings and per-letter overrides with the project (IndexedDB autosave); today they reset on reload.
 - PDF scan input via `pdfjs-dist`.
-- Stroke weight adjustment (dilate/erode before tracing).
+- ~~Stroke weight adjustment (dilate/erode before tracing).~~ Done early (2026-11-06) as the Stroke thickness slider, global and per letter.
 - Project export/import as a file, in addition to the IndexedDB autosave.
 - **Grayscale printing support** (user request, 2026-11-06). A template printed in grayscale left guide lines in the scan: the printer turns light blue into gray, often as halftone dots, which threshold as ink. For now the app tells users to print in color. Candidate fixes, roughly cheapest first; test each against a real grayscale-printed scan (ask the user for one and add it to `tests/fixtures/real/`):
   1. Blur or median-filter each cell crop slightly before thresholding, so halftone dots average into a light, uniform gray that falls above the ink cutoff, while felt-tip strokes stay dark.
   2. Erase lines at known positions: after warping, every guide's y position is known from `layout.ts`. Remove thin horizontal runs in those bands (morphological opening with a long horizontal kernel), keeping pixels where a pen stroke crosses (ink thicker than the guide line).
   3. A "grayscale-friendly" template option (needs a template version bump): much lighter or dotted guides, or guides only as short ticks at the cell edges outside the writing area.
   4. Compare the scan with a rendering of the blank template (pdf.js, already a dev dependency) and subtract the expected guide pixels.
+  - **Progress (2026-11-06):** per-cell lighting flattening fixed the shadow flooding on the user's grayscale scan, and detected guide rows are now guarded. Remaining: on grayscale prints the baseline is about as dark as ink, so it still bleeds into some lowercase letters (m, n, s, u, z). Test scan: `samples/grayscale p1 (shadow).jpg` (local only).
 
 ### M6: Variants and ligatures (phase 3)
 - **Start with a feasibility check:** can `opentype.js` write GSUB `calt` (contextual alternates) and `liga` lookups that Word and browsers honor? If not, write up options for the user, such as fontTools via Pyodide, before building anything.
@@ -288,3 +290,9 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 | 2026-11-06 | License: **MIT** for this repo's code (user default; as permissive as possible). The built app bundles Potrace (GPL-2.0), so the built app as a whole is distributed under GPL-2.0; README, LICENSE note, THIRD_PARTY_NOTICES.md, and an in-app footer say so | MIT code may be combined into a GPL work; the public repo provides the complete source GPL requires. A fully permissive build would require replacing Potrace |
 | 2026-11-06 | GitHub repo `nickhafen/handwriting-to-font` created **private** at the user's request to commit everything to GitHub; must become public before Pages can be enabled on a free plan (M4) | Private is the reversible default until the user approves going public |
 | 2026-11-06 | Templates must be printed in color for now; the Template step and README say so | Grayscale printing turned the guides into ink (backlog item under M5) |
+| 2026-11-06 | Cell thresholding is now **hysteresis**: definite ink < 0.6 × paper anchors strokes; faint ink < 0.8 × paper (the sensitivity slider moves this between 0.62 and 0.88) is kept only if connected to definite ink. Within ±4 px of each printed guide row, faint ink must be < 0.7 × paper | User's real scan with a fine pen lost faint parts of capitals (e.g. the left leg of A). The guide-band rule stops faint growth from running along a guide line |
+| 2026-11-06 | Ink controls pulled forward from M5: "all letters" panel plus per-letter overrides for ink sensitivity, stroke thickness (chamfer distance transform, −2…+4 px at 300 DPI) and smoothing (Potrace alphamax 0.2…1.3). Changes re-trace only affected cells in the worker from the stored grayscale crops; stale results are discarded | User asked for settings and per-character controls instead of switching to a thick marker |
+| 2026-11-06 | Trace options moved to `core/trace/options.ts` | Importing them in the UI no longer risks pulling the Potrace WASM into the main bundle |
+| 2026-11-06 | Before thresholding, each cell is divided by a local paper-brightness estimate (block max over 24 px blocks, spread 3×3, smoothed) | Hysteresis alone flooded shaded areas on the user's grayscale/shadow scan; flattening restores shaded paper to white |
+| 2026-11-06 | Guide guard also applies to rows that look like a printed line (≥ 35% of the width faint-but-not-dark), ±2 rows | On the user's sideways page-2 scan, guides sat more than 4 px from the predicted rows and grew into } and $ |
+| 2026-11-06 | Tuned against the user's real scans in `samples/` (color p1, color p2 sideways, grayscale p1 with shadow). They stay local: `samples/` and `tests/fixtures/real/` are gitignored | It's the user's handwriting and the repo may become public; ask before committing any real scans |
