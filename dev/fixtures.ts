@@ -33,6 +33,7 @@ async function scanSummary(blob: Blob) {
       inkArea: c.inkArea,
       yMin: c.yMinUnits,
       yMax: c.yMaxUnits,
+      contours: c.contours.length,
     })),
   }
 }

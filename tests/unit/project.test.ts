@@ -17,6 +17,7 @@ function cell(index: number, inkArea: number, touchesEdge = false): CellResult {
     yMinUnits: inkArea ? 0 : null,
     empty: inkArea < 40,
     touchesEdge,
+    contours: [],
   }
 }
 
@@ -50,5 +51,31 @@ describe('assembleGlyphs', () => {
     expect(find(g, 'W').clipped).toBe(true)
     expect(find(g, 'i').suspicious).toBe(true)
     expect(find(g, 'A').suspicious).toBe(false)
+  })
+})
+
+describe('building a font from reviewed glyphs', () => {
+  it('includes traced glyphs and fallbacks, and skips empty ones', async () => {
+    const { buildProjectFont, DEFAULT_FONT_SETTINGS, glyphInputs } = await import('../../src/core/project')
+    const { validateFont } = await import('../../src/core/font/validate')
+    const { ellipse } = await import('../../src/core/font/m0TestGlyphs')
+    const { fixWinding } = await import('../../src/core/trace/winding')
+    const ring = fixWinding([ellipse(200, 240, 180, 240, true), ellipse(200, 240, 100, 160, true)])
+    const withOutline = (c: CellResult): CellResult => (c.empty ? c : { ...c, contours: ring })
+    const p1 = page(0, { Q: cell(16, 0) })
+    const p2 = page(1, { '\u2019': cell(9, 0) })
+    for (const p of [p1, p2]) p.cells = p.cells.map(withOutline)
+    const glyphs = assembleGlyphs(new Map([[0, p1], [1, p2]]))
+
+    const inputs = glyphInputs(glyphs)
+    expect(inputs.find((g) => g.name === 'Q')).toBeUndefined()
+    expect(inputs.find((g) => g.name === 'quoteright')).toBeDefined()
+    expect(inputs).toHaveLength(102)
+
+    const built = buildProjectFont(glyphs, DEFAULT_FONT_SETTINGS, 'AB12')
+    const report = validateFont(built.buffer, [' ', ...'AQ\u2019'])
+    expect(report.missing).toEqual(['Q'])
+    expect(report.ok).toBe(true)
+    expect(report.stats.familyName).toBe('My Handwriting AB12')
   })
 })

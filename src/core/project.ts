@@ -1,4 +1,6 @@
 // Project state: which scanned page holds which characters, and the per-glyph review status.
+import { buildFont, type BuiltFont, type GlyphInput } from './font/build'
+import { DEFAULT_SPACING } from './font/metrics'
 import { suspiciousCells, type CellResult } from './scan/cells'
 import type { PageScan } from './scan/processPage'
 import { CHARSET, TEMPLATE_PAGES, type CharInfo } from './template/charset'
@@ -55,5 +57,45 @@ export function assembleGlyphs(pages: PagesByIndex): ReviewGlyph[] {
       suspicious: !usesFallback && suspicious.has(info.char),
       usesFallback,
     }
+  })
+}
+
+// ------------------------------------------------------------- font build -----
+
+export interface FontSettings {
+  /** Family name before any build suffix. */
+  familyName: string
+  /** Append a short build code on export so Windows doesn't show a cached older install. */
+  addBuildSuffix: boolean
+  /** Font units added to each side of every glyph (on top of the default 50). */
+  letterSpacing: number
+  /** Width of the space character in font units. */
+  wordSpacing: number
+}
+
+export const DEFAULT_FONT_SETTINGS: FontSettings = {
+  familyName: 'My Handwriting',
+  addBuildSuffix: true,
+  letterSpacing: 0,
+  wordSpacing: 280,
+}
+
+/** Glyphs that have traced outlines, ready for the font builder. Fallbacks reuse the source outlines. */
+export function glyphInputs(glyphs: ReviewGlyph[]): GlyphInput[] {
+  return glyphs.flatMap((g) =>
+    g.cell && !g.empty && g.cell.contours.length > 0
+      ? [{ name: g.info.glyphName, unicode: g.info.unicode, contours: g.cell.contours }]
+      : [],
+  )
+}
+
+/** Build the font for the current glyphs and settings. `suffix` is added to the family name if given. */
+export function buildProjectFont(glyphs: ReviewGlyph[], settings: FontSettings, suffix?: string): BuiltFont {
+  const base = settings.familyName.trim() || DEFAULT_FONT_SETTINGS.familyName
+  return buildFont({
+    familyName: suffix ? `${base} ${suffix}` : base,
+    glyphs: glyphInputs(glyphs),
+    spacing: { ...DEFAULT_SPACING, letterSpacing: settings.letterSpacing },
+    spaceWidth: settings.wordSpacing,
   })
 }

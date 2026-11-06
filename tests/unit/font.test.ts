@@ -58,10 +58,10 @@ describe('buildFont', () => {
     expect(report.stats.familyName).toBe('Test Hand')
   })
 
-  it('reports missing characters', () => {
+  it('reports missing characters separately from structural problems', () => {
     const report = validateFont(built.buffer, ['o', 'z'])
-    expect(report.ok).toBe(false)
     expect(report.missing).toEqual(['z'])
+    expect(report.ok).toBe(true)
   })
 })
 

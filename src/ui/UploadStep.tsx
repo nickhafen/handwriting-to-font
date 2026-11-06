@@ -24,6 +24,7 @@ const STAGE_TEXT: Record<ScanStage, string> = {
   warping: 'Straightening the page…',
   'page-id': 'Reading the page number…',
   cells: 'Cutting out the letters…',
+  tracing: 'Tracing outlines…',
 }
 
 export const PAGE_NAMES = ['Page 1 (letters)', 'Page 2 (numbers and punctuation)']

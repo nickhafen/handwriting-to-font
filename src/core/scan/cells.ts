@@ -1,4 +1,5 @@
 // Crop each cell's writing area from the canonical page, threshold it, clean it, and flag problems.
+import type { Contour } from '../geometry'
 import type { CharInfo } from '../template/charset'
 import { CELLS_PER_PAGE, PX_PER_PT, UNITS, UNITS_PER_PT, cellGeometry } from '../template/layout'
 import { removeSpecks } from './components'
@@ -40,6 +41,8 @@ export interface CellResult {
   empty: boolean
   /** Ink reaches the edge of the crop, so the character is probably cut off. */
   touchesEdge: boolean
+  /** Traced outlines in font units (filled in by the tracing step; empty until then). */
+  contours: Contour[]
 }
 
 /** Canonical-image pixel row (top edge of the row) inside a writing area -> font units. */
@@ -91,6 +94,7 @@ export function extractCell(canonical: GrayImage, index: number, settings: CellS
     yMinUnits: inkBox && !empty ? rowToUnits(maxY + 1) : null,
     empty,
     touchesEdge: !empty && touchesEdge,
+    contours: [],
   }
 }
 

@@ -22,7 +22,7 @@ export interface BBox {
   yMax: number
 }
 
-/** Bounding box of all on-curve and control points (a safe over-estimate for curves). */
+/** Tight bounding box: on-curve points plus the true extremes of each curve. */
 export function contoursBBox(contours: Contour[]): BBox | null {
   let xMin = Infinity
   let yMin = Infinity
@@ -36,15 +36,42 @@ export function contoursBBox(contours: Contour[]): BBox | null {
   }
   for (const c of contours) {
     add(c.start)
+    let p = c.start
     for (const s of c.segments) {
-      if (s.type === 'C') {
-        add(s.c1)
-        add(s.c2)
-      }
+      if (s.type === 'C') for (const t of cubicExtremaT(p, s.c1, s.c2, s.to)) add(cubicAt(p, s.c1, s.c2, s.to, t))
       add(s.to)
+      p = s.to
     }
   }
   return xMin === Infinity ? null : { xMin, yMin, xMax, yMax }
+}
+
+export function cubicAt(p0: Point, p1: Point, p2: Point, p3: Point, t: number): Point {
+  const u = 1 - t
+  return {
+    x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+    y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
+  }
+}
+
+/** Parameters in (0, 1) where a cubic's x or y derivative is zero (its true extremes). */
+function cubicExtremaT(p0: Point, p1: Point, p2: Point, p3: Point): number[] {
+  const out: number[] = []
+  for (const k of ['x', 'y'] as const) {
+    // B'(t)/3 = a t² + b t + c
+    const a = -p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]
+    const b = 2 * (p0[k] - 2 * p1[k] + p2[k])
+    const c = p1[k] - p0[k]
+    if (Math.abs(a) < 1e-12) {
+      if (Math.abs(b) > 1e-12) out.push(-c / b)
+      continue
+    }
+    const disc = b * b - 4 * a * c
+    if (disc < 0) continue
+    const sq = Math.sqrt(disc)
+    out.push((-b + sq) / (2 * a), (-b - sq) / (2 * a))
+  }
+  return out.filter((t) => t > 0 && t < 1)
 }
 
 export function translateContours(contours: Contour[], dx: number, dy: number): Contour[] {

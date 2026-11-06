@@ -216,6 +216,8 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 - Potrace, contour conversion, winding, metrics, build, validation, and the Preview & download step.
 - **GATE:** the user fills in the real template, scans it, installs the font, and tests it in Word.
 
+- **Built (2026-11-06):** Potrace runs in the worker on each cell (ImageData input), `svgpath` applies Potrace's transform, contours map to font units with the constant scale, winding is fixed by nesting depth. Review tiles draw the traced outlines (nonzero fill, so a wrong-direction hole would show). Preview & download step: size, letter- and word-spacing sliders, font name, build-code toggle, FontFace preview, checks list. Playwright downloads the OTF and re-parses it (cmap, win metrics, winding of every glyph, baselines, sidebearings, quote fallbacks).
+
 ### M4: Deploy
 - The GitHub Actions workflow and Pages setup, after the user approves.
 
@@ -271,3 +273,8 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 | 2026-11-05 | "Suspicious" compares letters/digits with the median letter/digit ink area (< 0.12× or > 4×); punctuation is only flagged when too large | A period is legitimately tiny |
 | 2026-11-05 | `core/project.ts` assembles per-glyph review status (incl. curly-quote fallbacks) from the scanned pages | Pure and unit-testable; the UI only renders it |
 | 2026-11-05 | Fixtures write characters in Segoe Print / Ink Free / Comic Sans (whichever exists), shrunk to fit the writing area | Handwriting-like system fonts; CI (Linux) falls back to another font, so assertions use tolerances and compare photos against the clean scan |
+| 2026-11-06 | Glyph bounding boxes use true cubic extremes, not control points | Control points bulge past round letters; sidebearings came out ~5 units too wide |
+| 2026-11-06 | `validateFont` also checks every glyph's contour directions; `ok` ignores missing characters (reported separately) | A blank cell shouldn't block a download; a wrong winding should |
+| 2026-11-06 | Preview fonts use the plain name; only the downloaded font gets the build code | The code changes every minute and is only needed for installs |
+| 2026-11-06 | Line metrics: typo/hhea ascender 900, descender −300; usWin metrics from the actual ink extremes | Consistent line height; Windows never clips tails or tall letters |
+| 2026-11-06 | `core/font/pathCommands.ts` holds the opentype-command converter with a type-only import | Lets Node-side tests (Playwright) use it without importing opentype.js |

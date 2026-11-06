@@ -314,3 +314,72 @@ h3 {
   max-width: 100%;
   border: 1px solid #ccc;
 }
+
+.glyph svg {
+  width: 100%;
+  aspect-ratio: 281 / 233;
+  display: block;
+  background: #fff;
+}
+
+.glyph svg path,
+.outline-large path {
+  fill: #111;
+}
+
+.guide-baseline {
+  stroke: rgba(214, 40, 40, 0.75);
+  stroke-width: 14;
+}
+
+.guide-xheight {
+  stroke: rgba(30, 110, 200, 0.6);
+  stroke-width: 12;
+  stroke-dasharray: 36 24;
+}
+
+.outline-large {
+  width: 281px;
+  max-width: 100%;
+  aspect-ratio: 281 / 233;
+  display: block;
+  border: 1px solid #ccc;
+  background: #fff;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+
+.controls output {
+  font-variant-numeric: tabular-nums;
+  color: #444;
+  margin-left: 0.25rem;
+}
+
+.font-preview {
+  white-space: pre-wrap;
+  line-height: normal;
+  border: 1px solid #ccc;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.checks .warn::before {
+  content: '! ';
+  font-weight: bold;
+}
+
+.download-row {
+  margin-top: 1rem;
+}

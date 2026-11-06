@@ -16,7 +16,8 @@
     "opentype.js": "^2.0.0",
     "pdf-lib": "^1.17.1",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "svgpath": "^2.6.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",

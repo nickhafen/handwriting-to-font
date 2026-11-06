@@ -3,6 +3,7 @@ import { assembleGlyphs } from '../core/project'
 import type { PageScan } from '../core/scan/processPage'
 import { TEMPLATE_PAGES } from '../core/template/charset'
 import { TEMPLATE_VERSION } from '../core/template/layout'
+import { PreviewStep } from './PreviewStep'
 import { ReviewStep } from './ReviewStep'
 import { ScanFailure, scanFile } from './scanClient'
 import { TemplateStep } from './TemplateStep'
@@ -63,10 +64,7 @@ export function App() {
       <TemplateStep />
       <UploadStep uploads={uploads} onFiles={onFiles} onPickPage={(key, pageIndex) => update(key, { pageIndex })} />
       <ReviewStep glyphs={glyphs} />
-      <section aria-labelledby="step-preview" className="pending">
-        <h2 id="step-preview">4. Preview and download your font</h2>
-        <p className="note">Coming soon.</p>
-      </section>
+      <PreviewStep glyphs={glyphs} />
     </main>
   )
 }

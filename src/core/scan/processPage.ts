@@ -14,7 +14,7 @@ export interface ScanSettings {
 
 export const DEFAULT_SCAN_SETTINGS: ScanSettings = { markers: DEFAULT_MARKER_SETTINGS, cells: DEFAULT_CELL_SETTINGS }
 
-export type ScanStage = 'loading' | 'markers' | 'warping' | 'page-id' | 'cells'
+export type ScanStage = 'loading' | 'markers' | 'warping' | 'page-id' | 'cells' | 'tracing'
 
 export interface PageScan {
   pageId: PageId | null

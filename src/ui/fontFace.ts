@@ -2,17 +2,25 @@
 
 let counter = 0
 
+export interface PreviewFace {
+  family: string
+  face: FontFace
+}
+
 /**
  * Load a built font through the FontFace API. Chrome runs the OpenType
  * Sanitizer here, so if this resolves, browsers accept the font.
- * Returns the CSS family name to use for previews.
  */
-export async function loadPreviewFont(buffer: ArrayBuffer): Promise<string> {
+export async function loadPreviewFont(buffer: ArrayBuffer): Promise<PreviewFace> {
   const family = `hw-preview-${++counter}`
   const face = new FontFace(family, buffer)
   await face.load()
   document.fonts.add(face)
-  return family
+  return { family, face }
+}
+
+export function unloadPreviewFont(p: PreviewFace | null): void {
+  if (p) document.fonts.delete(p.face)
 }
 
 export function downloadBlob(data: BlobPart, fileName: string, type: string): void {

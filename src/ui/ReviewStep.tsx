@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReviewGlyph } from '../core/project'
 import type { CellResult } from '../core/scan/cells'
 import { PX_PER_PT, UNITS, UNITS_PER_PT } from '../core/template/layout'
+import { GlyphOutline } from './GlyphOutline'
 import { PAGE_NAMES } from './UploadStep'
 
 /** Pixel row in a cell crop where a font-unit height falls. */
@@ -99,8 +100,8 @@ export function ReviewStep({ glyphs }: { glyphs: ReviewGlyph[] }) {
         {counts.missing > 0 && `, ${counts.missing} on a page not uploaded yet`}.
       </p>
       <p className="note">
-        <span className="swatch baseline" /> baseline <span className="swatch xheight" /> x-height. Click a letter to
-        compare it with the original scan.
+        <span className="swatch baseline" /> baseline <span className="swatch xheight" /> x-height. Letters are drawn from their traced
+        outlines. Click one to compare it with the original scan.
       </p>
       {sel?.cell && (
         <div className="detail" role="region" aria-label={`Details for ${sel.info.char}`}>
@@ -118,6 +119,10 @@ export function ReviewStep({ glyphs }: { glyphs: ReviewGlyph[] }) {
             <figure>
               <CellCanvas cell={sel.cell} mode="ink" displayWidth={281} />
               <figcaption>Cleaned ink</figcaption>
+            </figure>
+            <figure>
+              <GlyphOutline contours={sel.cell.contours} className="outline-large" />
+              <figcaption>Traced outline ({sel.cell.contours.length} contours)</figcaption>
             </figure>
           </div>
           {sel.cell.yMaxUnits !== null && (
@@ -146,7 +151,7 @@ export function ReviewStep({ glyphs }: { glyphs: ReviewGlyph[] }) {
                     data-state={g.pageMissing ? 'missing' : g.empty ? 'empty' : 'ok'}
                   >
                     <span className="glyph-char">{g.info.char}</span>
-                    {g.cell && !g.empty ? <CellCanvas cell={g.cell} mode="ink" displayWidth={110} /> : <span className="glyph-blank" />}
+                    {g.cell && !g.empty ? <GlyphOutline contours={g.cell.contours} /> : <span className="glyph-blank" />}
                     <span className="badges">
                       {badges(g).map((b) => (
                         <span key={b.text} className={`badge ${b.kind}`}>
