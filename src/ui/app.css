@@ -383,3 +383,15 @@ h3 {
 .download-row {
   margin-top: 1rem;
 }
+
+.site-footer {
+  margin-top: 2rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #ccc;
+  font-size: 0.85rem;
+  color: #444;
+}
+
+.site-footer a {
+  color: #1a4f8b;
+}

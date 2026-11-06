@@ -65,6 +65,11 @@ export function App() {
       <UploadStep uploads={uploads} onFiles={onFiles} onPickPage={(key, pageIndex) => update(key, { pageIndex })} />
       <ReviewStep glyphs={glyphs} />
       <PreviewStep glyphs={glyphs} />
+      <footer className="site-footer">
+        <a href="https://github.com/nickhafen/handwriting-to-font">Source code</a> · App code: MIT License · Includes
+        Potrace (GPL-2.0), so the app as a whole is distributed under GPL-2.0.{' '}
+        <a href="https://github.com/nickhafen/handwriting-to-font/blob/main/THIRD_PARTY_NOTICES.md">Licenses</a>
+      </footer>
     </main>
   )
 }

@@ -63,7 +63,8 @@ export function TemplateStep() {
       )}
       <ol className="instructions">
         <li>
-          Print all {TEMPLATE_PAGES.length} pages at <b>100% / Actual size</b> (turn off “Fit to page” if you can).
+          Print all {TEMPLATE_PAGES.length} pages <b>in color</b> at <b>100% / Actual size</b> (turn off “Fit to page” if
+          you can). The light-blue guide lines are ignored when scanned; grayscale printing can turn them into ink.
         </li>
         <li>
           Use a <b>black felt-tip pen</b>. Ballpoint lines are often too thin and faint.

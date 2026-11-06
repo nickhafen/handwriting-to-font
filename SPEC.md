@@ -218,6 +218,8 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 
 - **Built (2026-11-06):** Potrace runs in the worker on each cell (ImageData input), `svgpath` applies Potrace's transform, contours map to font units with the constant scale, winding is fixed by nesting depth. Review tiles draw the traced outlines (nonzero fill, so a wrong-direction hole would show). Preview & download step: size, letter- and word-spacing sliders, font name, build-code toggle, FontFace preview, checks list. Playwright downloads the OTF and re-parses it (cmap, win metrics, winding of every glyph, baselines, sidebearings, quote fallbacks).
 
+- **GATE status (2026-11-06):** first real test used a template printed in grayscale; guide lines leaked into the scan (see the grayscale item under M5). User will retest with a color print.
+
 ### M4: Deploy
 - The GitHub Actions workflow and Pages setup, after the user approves.
 
@@ -226,6 +228,11 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 - PDF scan input via `pdfjs-dist`.
 - Stroke weight adjustment (dilate/erode before tracing).
 - Project export/import as a file, in addition to the IndexedDB autosave.
+- **Grayscale printing support** (user request, 2026-11-06). A template printed in grayscale left guide lines in the scan: the printer turns light blue into gray, often as halftone dots, which threshold as ink. For now the app tells users to print in color. Candidate fixes, roughly cheapest first; test each against a real grayscale-printed scan (ask the user for one and add it to `tests/fixtures/real/`):
+  1. Blur or median-filter each cell crop slightly before thresholding, so halftone dots average into a light, uniform gray that falls above the ink cutoff, while felt-tip strokes stay dark.
+  2. Erase lines at known positions: after warping, every guide's y position is known from `layout.ts`. Remove thin horizontal runs in those bands (morphological opening with a long horizontal kernel), keeping pixels where a pen stroke crosses (ink thicker than the guide line).
+  3. A "grayscale-friendly" template option (needs a template version bump): much lighter or dotted guides, or guides only as short ticks at the cell edges outside the writing area.
+  4. Compare the scan with a rendering of the blank template (pdf.js, already a dev dependency) and subtract the expected guide pixels.
 
 ### M6: Variants and ligatures (phase 3)
 - **Start with a feasibility check:** can `opentype.js` write GSUB `calt` (contextual alternates) and `liga` lookups that Word and browsers honor? If not, write up options for the user, such as fontTools via Pyodide, before building anything.
@@ -253,7 +260,7 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 | 2026-11-05 | OTF only via opentype.js | opentype.js doesn't write TrueType; OTF installs everywhere |
 | 2026-11-05 | Corner markers + light-blue guides; no OpenCV.js | Small bundle; handles scaling and perspective; guides drop out when thresholded |
 | 2026-11-05 | Repo lives outside OneDrive | Avoid syncing `node_modules` |
-| 2026-11-05 | Potrace is GPL-2.0 in every available form; the app's own license must be GPL-compatible. **User to choose the license before M4** (e.g. GPL-2.0-or-later) | Both `esm-potrace-wasm` and `kilobtye/potrace` are GPL-2.0, inherited from Potrace itself |
+| 2026-11-05 | Potrace is GPL-2.0 in every available form; the app's own license must be GPL-compatible. (Resolved 2026-11-06: see the MIT row below) | Both `esm-potrace-wasm` and `kilobtye/potrace` are GPL-2.0, inherited from Potrace itself |
 | 2026-11-05 | Versions at M0: Vite 8, React 19, TypeScript 7, Vitest 5, opentype.js 2.0, esm-potrace-wasm 0.5.1 | Current releases. opentype.js 2.0 ships no types, so `src/types/opentype.d.ts` declares the subset we use (no `@types` package, which targets 1.x) |
 | 2026-11-05 | M0 test font has `o`, `p`, `l` (not just `o`) | Exercises a hole, a descender to −300, and an ascender to +900, so the Word test actually checks clipping |
 | 2026-11-05 | Potrace output confirmed: relative path commands inside `translate(0,H) scale(0.1,-0.1)` | Confirms M3 needs `svgpath` to apply the transform before mapping to font units |
@@ -278,3 +285,6 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 | 2026-11-06 | Preview fonts use the plain name; only the downloaded font gets the build code | The code changes every minute and is only needed for installs |
 | 2026-11-06 | Line metrics: typo/hhea ascender 900, descender −300; usWin metrics from the actual ink extremes | Consistent line height; Windows never clips tails or tall letters |
 | 2026-11-06 | `core/font/pathCommands.ts` holds the opentype-command converter with a type-only import | Lets Node-side tests (Playwright) use it without importing opentype.js |
+| 2026-11-06 | License: **MIT** for this repo's code (user default; as permissive as possible). The built app bundles Potrace (GPL-2.0), so the built app as a whole is distributed under GPL-2.0; README, LICENSE note, THIRD_PARTY_NOTICES.md, and an in-app footer say so | MIT code may be combined into a GPL work; the public repo provides the complete source GPL requires. A fully permissive build would require replacing Potrace |
+| 2026-11-06 | GitHub repo `nickhafen/handwriting-to-font` created **private** at the user's request to commit everything to GitHub; must become public before Pages can be enabled on a free plan (M4) | Private is the reversible default until the user approves going public |
+| 2026-11-06 | Templates must be printed in color for now; the Template step and README say so | Grayscale printing turned the guides into ink (backlog item under M5) |
