@@ -13,6 +13,9 @@ export interface GlyphInput {
   unicode: number
   /** Outlines in font units, y-up, baseline at 0. Horizontal position is ignored. */
   contours: Contour[]
+  /** Extra font units of space before / after this glyph (added to the sidebearings). */
+  spaceBefore?: number
+  spaceAfter?: number
 }
 
 export interface FontBuildInput {
@@ -85,7 +88,11 @@ export function buildFont(input: FontBuildInput): BuiltFont {
   let yMax = DEFAULT_ASCENDER
   let yMin = DEFAULT_DESCENDER
   for (const g of input.glyphs) {
-    const placed = placeGlyph(g.contours, input.spacing)
+    const placed = placeGlyph(g.contours, {
+      ...input.spacing,
+      lsb: input.spacing.lsb + (g.spaceBefore ?? 0),
+      rsb: input.spacing.rsb + (g.spaceAfter ?? 0),
+    })
     const bbox = contoursBBox(placed.contours)
     if (bbox) {
       yMax = Math.max(yMax, Math.ceil(bbox.yMax))

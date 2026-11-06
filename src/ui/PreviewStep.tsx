@@ -7,16 +7,13 @@ import {
   usableCount,
   type FontSettings,
   type GenerateSettings,
+  type GlyphMetrics,
   type GlyphsByStyle,
 } from '../core/project'
 import { CHARSET } from '../core/template/charset'
 import { STYLES, type StyleId } from '../core/template/styles'
 import { downloadBlob, loadPreviewFont, unloadPreviewFont, type PreviewFace } from './fontFace'
-
-const SAMPLE_TEXT = `The quick brown fox jumps over the lazy dog.
-PACK MY BOX WITH FIVE DOZEN LIQUOR JUGS!
-0123456789  “Quotes” and ‘apostrophes’ aren’t hard — really… (yes) [ok] {fine}
-@ # $ % & * + = < > ^ _ ~ | \\ / § • \``
+import { DEFAULT_PREVIEW_SIZE } from './sampleText'
 
 const EXPECTED = [' ', ...CHARSET.map((c) => c.char)]
 
@@ -44,12 +41,19 @@ interface Props {
   uploadedStyles: Set<StyleId>
   generate: GenerateSettings
   onGenerate: (g: GenerateSettings) => void
+  metrics: Record<string, GlyphMetrics>
+  settings: FontSettings
+  onSettings: (s: FontSettings) => void
+  text: string
+  onText: (t: string) => void
+  size: number
+  onSize: (n: number) => void
 }
 
-export function PreviewStep({ glyphs, uploadedStyles, generate, onGenerate }: Props) {
-  const [settings, setSettings] = useState<FontSettings>(DEFAULT_FONT_SETTINGS)
-  const [text, setText] = useState(SAMPLE_TEXT)
-  const [size, setSize] = useState(48)
+export function PreviewStep(props: Props) {
+  const { glyphs, uploadedStyles, generate, onGenerate, metrics, settings, text, size } = props
+  const setText = props.onText
+  const setSize = props.onSize
   const [previews, setPreviews] = useState<Partial<Record<StyleId, StylePreview>>>({})
   const [hidden, setHidden] = useState<Set<StyleId>>(new Set())
   const [downloaded, setDownloaded] = useState<string[] | null>(null)
@@ -69,7 +73,7 @@ export function PreviewStep({ glyphs, uploadedStyles, generate, onGenerate }: Pr
       const loaded: PreviewFace[] = []
       for (const s of available) {
         try {
-          const built = buildProjectFont(glyphs[s.id], settings, undefined, s.id, generate.slant)
+          const built = buildProjectFont(glyphs[s.id], settings, undefined, s.id, generate.slant, metrics)
           const report = validateFont(built.buffer, EXPECTED)
           try {
             const face = await loadPreviewFont(built.buffer)
@@ -95,7 +99,7 @@ export function PreviewStep({ glyphs, uploadedStyles, generate, onGenerate }: Pr
       clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [glyphs, availableKey, settings.letterSpacing, settings.wordSpacing, generate.slant])
+  }, [glyphs, metrics, availableKey, settings.letterSpacing, settings.wordSpacing, generate.slant])
 
   useEffect(() => () => faces.current.forEach(unloadPreviewFont), [])
 
@@ -116,7 +120,7 @@ export function PreviewStep({ glyphs, uploadedStyles, generate, onGenerate }: Pr
     const suffix = settings.addBuildSuffix ? buildSuffix() : undefined
     const files: { name: string; buffer: ArrayBuffer }[] = []
     for (const s of available) {
-      const built = buildProjectFont(glyphs[s.id], settings, suffix, s.id, generate.slant)
+      const built = buildProjectFont(glyphs[s.id], settings, suffix, s.id, generate.slant, metrics)
       const report = validateFont(built.buffer, EXPECTED)
       if (!report.ok) {
         setDownloadError(`The ${s.label} font failed its checks, so nothing was downloaded: ${report.errors.join(' ')}`)
@@ -138,7 +142,11 @@ export function PreviewStep({ glyphs, uploadedStyles, generate, onGenerate }: Pr
     )
   }
 
-  const set = (patch: Partial<FontSettings>) => setSettings((s) => ({ ...s, ...patch }))
+  const set = (patch: Partial<FontSettings>) => props.onSettings({ ...settings, ...patch })
+  const slidersAtDefault =
+    size === DEFAULT_PREVIEW_SIZE &&
+    settings.letterSpacing === DEFAULT_FONT_SETTINGS.letterSpacing &&
+    settings.wordSpacing === DEFAULT_FONT_SETTINGS.wordSpacing
   const gen = (patch: Partial<GenerateSettings>) => onGenerate({ ...generate, ...patch })
   const regular = previews.regular
   const shown = available.filter((s) => !hidden.has(s.id))
@@ -174,6 +182,16 @@ export function PreviewStep({ glyphs, uploadedStyles, generate, onGenerate }: Pr
             onChange={(e) => set({ wordSpacing: Number(e.target.value) })}
           />
         </label>
+        <button
+          className="secondary reset-sliders"
+          disabled={slidersAtDefault}
+          onClick={() => {
+            setSize(DEFAULT_PREVIEW_SIZE)
+            set({ letterSpacing: DEFAULT_FONT_SETTINGS.letterSpacing, wordSpacing: DEFAULT_FONT_SETTINGS.wordSpacing })
+          }}
+        >
+          Reset to defaults
+        </button>
       </div>
 
       <fieldset className="styles-panel">

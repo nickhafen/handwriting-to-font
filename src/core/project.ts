@@ -175,22 +175,63 @@ export interface FontSettings {
 export const DEFAULT_FONT_SETTINGS: FontSettings = {
   familyName: 'My Handwriting',
   addBuildSuffix: true,
-  letterSpacing: 0,
+  letterSpacing: -20,
   wordSpacing: 280,
 }
 
-/** Glyphs that have outlines, ready for the font builder. Fallbacks reuse the source outlines. */
-export function glyphInputs(glyphs: ReviewGlyph[]): GlyphInput[] {
-  return glyphs.flatMap((g) => (usable(g) ? [{ name: g.info.glyphName, unicode: g.info.unicode, contours: g.outline }] : []))
+// ------------------------------------------------- per-glyph position --------
+
+/** Per-character position and spacing, applied when the font is built (the outline itself is unchanged). */
+export interface GlyphMetrics {
+  /** Font units to move the glyph up (+) or down (−). */
+  shiftY: number
+  /** Extra font units of space before and after the glyph. */
+  spaceBefore: number
+  spaceAfter: number
+}
+
+export const DEFAULT_METRICS: GlyphMetrics = { shiftY: 0, spaceBefore: 0, spaceAfter: 0 }
+
+export const isDefaultMetrics = (m?: GlyphMetrics) => !m || (m.shiftY === 0 && m.spaceBefore === 0 && m.spaceAfter === 0)
+
+/** Key for per-character settings: "style:char". */
+export const glyphKey = (style: StyleId, char: string) => `${style}:${char}`
+
+/** Generated glyphs use the position of the Regular glyph they were made from. */
+export const metricsKeyFor = (g: ReviewGlyph) => glyphKey(g.generated ? 'regular' : g.style, g.info.char)
+
+export function shiftContours(contours: Contour[], dy: number): Contour[] {
+  if (!dy) return contours
+  const t = (p: Point): Point => ({ x: p.x, y: p.y + dy })
+  return contours.map((c) => ({
+    start: t(c.start),
+    segments: c.segments.map((s) => (s.type === 'L' ? { type: 'L', to: t(s.to) } : { type: 'C', c1: t(s.c1), c2: t(s.c2), to: t(s.to) })),
+  }))
+}
+
+/** Glyphs that have outlines, ready for the font builder, with any per-character position and spacing. */
+export function glyphInputs(glyphs: ReviewGlyph[], metrics: Record<string, GlyphMetrics> = {}): GlyphInput[] {
+  return glyphs.flatMap((g) => {
+    if (!usable(g)) return []
+    const m = metrics[metricsKeyFor(g)] ?? DEFAULT_METRICS
+    return [{ name: g.info.glyphName, unicode: g.info.unicode, contours: shiftContours(g.outline, m.shiftY), spaceBefore: m.spaceBefore, spaceAfter: m.spaceAfter }]
+  })
 }
 
 /** Build one style's font. `suffix` is added to the family name if given. */
-export function buildProjectFont(glyphs: ReviewGlyph[], settings: FontSettings, suffix?: string, style: StyleId = 'regular', slant = 0): BuiltFont {
+export function buildProjectFont(
+  glyphs: ReviewGlyph[],
+  settings: FontSettings,
+  suffix?: string,
+  style: StyleId = 'regular',
+  slant = 0,
+  metrics: Record<string, GlyphMetrics> = {},
+): BuiltFont {
   const base = settings.familyName.trim() || DEFAULT_FONT_SETTINGS.familyName
   const info = styleInfo(style)
   return buildFont({
     familyName: suffix ? `${base} ${suffix}` : base,
-    glyphs: glyphInputs(glyphs),
+    glyphs: glyphInputs(glyphs, metrics),
     spacing: { ...DEFAULT_SPACING, letterSpacing: settings.letterSpacing },
     spaceWidth: settings.wordSpacing,
     style: { name: info.label, weight: info.weight, italicAngle: info.italic ? -(slant || DEFAULT_GENERATE.slant) : 0 },

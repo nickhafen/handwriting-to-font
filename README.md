@@ -15,7 +15,8 @@ There is no server, no account, and no AI model.
 2. **Write** each character in its box with a black felt-tip pen, sitting on the solid baseline.
 3. **Scan** at 300 DPI, or photograph each page flat in even light with all four black
    corner squares in view.
-4. **Upload** the images, **review** the letters, then **preview and download** your font.
+4. **Upload** the images, **review** the letters (adjust ink, position and spacing per letter), then **preview and download** your font. Optional Bold and Italic styles can be written on their own template sets or generated.
+   Your project is saved automatically in your browser, so you can come back later and redo a few characters with a redo sheet.
 5. Open the `.otf` file, click **Install**, and restart Word.
 
 ## Development

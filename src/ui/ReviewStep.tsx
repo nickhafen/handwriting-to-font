@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { usable, type GlyphsByStyle, type ReviewGlyph } from '../core/project'
+import { isDefaultMetrics, metricsKeyFor, usable, type GlyphMetrics, type GlyphsByStyle, type ReviewGlyph } from '../core/project'
 import { DEFAULT_ADJUST, sameAdjust, type InkAdjust } from '../core/scan/adjust'
 import type { CellResult } from '../core/scan/cells'
 import { PX_PER_PT, UNITS, UNITS_PER_PT } from '../core/template/layout'
 import { PAGE_NAMES, STYLES, styleInfo, type StyleId } from '../core/template/styles'
 import { GlyphOutline } from './GlyphOutline'
 import { InkControls } from './InkControls'
+import { PositionControls } from './PositionControls'
 import { overrideKey } from './useProject'
 
 /** Pixel row in a cell crop where a font-unit height falls. */
@@ -90,11 +91,13 @@ interface Props {
   onApplyToAll: (a: InkAdjust) => void
   redo: Set<string>
   onToggleRedo: (style: StyleId, char: string) => void
+  metrics: Record<string, GlyphMetrics>
+  onMetrics: (key: string, m: GlyphMetrics | null) => void
   busy: boolean
 }
 
 export function ReviewStep(p: Props) {
-  const { glyphs, uploadedStyles, adjust, overrides, redo, busy } = p
+  const { glyphs, uploadedStyles, adjust, overrides, redo, busy, metrics } = p
   const [style, setStyle] = useState<StyleId>('regular')
   const [selected, setSelected] = useState<string | null>(null)
   const drawerRef = useRef<HTMLDivElement>(null)
@@ -129,7 +132,8 @@ export function ReviewStep(p: Props) {
     flagged: list.filter((g) => g.clipped || g.suspicious).length,
     missing: list.filter((g) => g.pageMissing && !g.generated).length,
   }
-  const isAdjusted = (g: ReviewGlyph) => !!overrides[overrideKey(g.style, g.info.char)]
+  const metricsOf = (g: ReviewGlyph) => metrics[metricsKeyFor(g)]
+  const isAdjusted = (g: ReviewGlyph) => !!overrides[overrideKey(g.style, g.info.char)] || !isDefaultMetrics(metricsOf(g))
   const isRedo = (g: ReviewGlyph) => redo.has(overrideKey(g.style, g.info.char))
   const step = (d: number) => {
     // Next/previous glyph that has something to show.
@@ -212,7 +216,7 @@ export function ReviewStep(p: Props) {
                       data-state={g.pageMissing ? 'missing' : g.empty ? 'empty' : 'ok'}
                     >
                       <span className="glyph-char">{g.info.char}</span>
-                      {usable(g) ? <GlyphOutline contours={g.outline} /> : <span className="glyph-blank" />}
+                      {usable(g) ? <GlyphOutline contours={g.outline} shiftY={metricsOf(g)?.shiftY} /> : <span className="glyph-blank" />}
                       <span className="badges">
                         {b.map((x) => (
                           <span key={x.text} className={`badge ${x.kind}`}>
@@ -266,7 +270,7 @@ export function ReviewStep(p: Props) {
                   <figcaption>Cleaned ink</figcaption>
                 </figure>
                 <figure>
-                  <GlyphOutline contours={sel.outline} className="outline-large" />
+                  <GlyphOutline contours={sel.outline} className="outline-large" shiftY={metricsOf(sel)?.shiftY} />
                   <figcaption>Outline in the font ({sel.outline.length} contours)</figcaption>
                 </figure>
               </div>
@@ -292,7 +296,7 @@ export function ReviewStep(p: Props) {
                     <div className="row">
                       <button
                         className="secondary"
-                        disabled={!isAdjusted(sel)}
+                        disabled={!overrides[overrideKey(sel.style, sel.info.char)]}
                         onClick={() => p.onOverride(sel.style, sel.info.char, null)}
                       >
                         Revert to default
@@ -304,6 +308,25 @@ export function ReviewStep(p: Props) {
                         Apply to all letters
                       </button>
                     </div>
+                  </>
+                )}
+                <h4 className="position-head">Position and spacing</h4>
+                {sel.generated ? (
+                  <p className="note">Uses the position and spacing of the Regular “{sel.info.char}”.</p>
+                ) : (
+                  <>
+                    <PositionControls
+                      idPrefix={`pos-${sel.info.unicode}`}
+                      value={metricsOf(sel)}
+                      onChange={(m) => p.onMetrics(metricsKeyFor(sel), m)}
+                    />
+                    <button
+                      className="secondary"
+                      disabled={isDefaultMetrics(metricsOf(sel))}
+                      onClick={() => p.onMetrics(metricsKeyFor(sel), null)}
+                    >
+                      Reset position and spacing
+                    </button>
                   </>
                 )}
                 <label className="redo-toggle">

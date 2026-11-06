@@ -26,7 +26,7 @@ export function contoursToPath(contours: Contour[]): string {
  * x-height guides. Uses the nonzero fill rule, like font rasterizers do, so a
  * hole with the wrong contour direction would show up filled in.
  */
-export function GlyphOutline({ contours, className }: { contours: Contour[]; className?: string }) {
+export function GlyphOutline({ contours, className, shiftY = 0 }: { contours: Contour[]; className?: string; shiftY?: number }) {
   return (
     <svg
       className={className}
@@ -36,7 +36,7 @@ export function GlyphOutline({ contours, className }: { contours: Contour[]; cla
     >
       <line x1="0" x2={WIDTH} y1={-UNITS.xHeight} y2={-UNITS.xHeight} className="guide-xheight" />
       <line x1="0" x2={WIDTH} y1={-UNITS.baseline} y2={-UNITS.baseline} className="guide-baseline" />
-      <path d={contoursToPath(contours)} fillRule="nonzero" />
+      <path d={contoursToPath(contours)} fillRule="nonzero" transform={shiftY ? `translate(0 ${-shiftY})` : undefined} />
     </svg>
   )
 }

@@ -21,6 +21,8 @@ interface Props {
   onFiles: (files: File[]) => void
   onPickSlot: (key: number, slot: Slot) => void
   onRemove: (key: number) => void
+  restored: { files: number; savedAt: number } | null
+  onStartOver: () => void
 }
 
 /** Dev server only: load the images in ./samples whose names contain "color" (or all of them if none do). */
@@ -37,7 +39,7 @@ async function loadSamples(): Promise<File[]> {
   )
 }
 
-export function UploadStep({ uploads, onFiles, onPickSlot, onRemove }: Props) {
+export function UploadStep({ uploads, onFiles, onPickSlot, onRemove, restored, onStartOver }: Props) {
   const input = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [sampleError, setSampleError] = useState<string | null>(null)
@@ -95,6 +97,22 @@ export function UploadStep({ uploads, onFiles, onPickSlot, onRemove }: Props) {
         />
         {sampleError && <p className="bad">{sampleError}</p>}
       </div>
+      <p className="note autosave-note" data-testid="autosave-note">
+        {restored
+          ? `Restored your project from ${new Date(restored.savedAt).toLocaleString()} (${restored.files} image${restored.files === 1 ? '' : 's'}). `
+          : ''}
+        Your project is saved automatically in this browser (never uploaded anywhere).{' '}
+        {(uploads.length > 0 || restored) && (
+          <button
+            className="link"
+            onClick={() => {
+              if (window.confirm('Delete your saved project (scans and settings) and start over?')) onStartOver()
+            }}
+          >
+            Start over
+          </button>
+        )}
+      </p>
       <p className="note">
         Uploading a page again only replaces the characters written on the new copy; blank boxes keep the earlier
         version. That's how redo sheets work.

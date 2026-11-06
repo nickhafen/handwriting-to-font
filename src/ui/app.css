@@ -586,3 +586,11 @@ button.link {
 .style-preview h3 {
   margin-bottom: 0.25rem;
 }
+
+.position-head {
+  margin: 1rem 0 0.25rem;
+}
+
+.reset-sliders {
+  align-self: center;
+}

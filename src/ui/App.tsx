@@ -13,7 +13,14 @@ export function App() {
       <p>Turn your handwriting into a font you can install and use in Word.</p>
       <p className="note">Everything runs in your browser. Your handwriting never leaves your computer.</p>
       <TemplateStep redo={project.redo} onClearRedo={project.clearRedo} />
-      <UploadStep uploads={project.uploads} onFiles={project.addFiles} onPickSlot={project.pickSlot} onRemove={project.removeUpload} />
+      <UploadStep
+        uploads={project.uploads}
+        onFiles={project.addFiles}
+        onPickSlot={project.pickSlot}
+        onRemove={project.removeUpload}
+        restored={project.restored}
+        onStartOver={project.startOver}
+      />
       <ReviewStep
         glyphs={project.glyphs}
         uploadedStyles={project.uploadedStyles}
@@ -24,6 +31,8 @@ export function App() {
         onApplyToAll={project.applyToAll}
         redo={project.redo}
         onToggleRedo={project.toggleRedo}
+        metrics={project.metrics}
+        onMetrics={project.setMetrics}
         busy={project.busy > 0}
       />
       <PreviewStep
@@ -31,6 +40,13 @@ export function App() {
         uploadedStyles={project.uploadedStyles}
         generate={project.generate}
         onGenerate={project.setGenerate}
+        metrics={project.metrics}
+        settings={project.font}
+        onSettings={project.setFont}
+        text={project.previewText}
+        onText={project.setPreviewText}
+        size={project.previewSize}
+        onSize={project.setPreviewSize}
       />
       <footer className="site-footer">
         <a href="https://github.com/nickhafen/handwriting-to-font">Source code</a> · App code: MIT License · Includes

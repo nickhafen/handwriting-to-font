@@ -222,14 +222,15 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 - **GATE status (2026-11-06):** first real test used a template printed in grayscale; guide lines leaked into the scan (see the grayscale item under M5). User will retest with a color print.
 
 ### M4: Deploy
+- **Done 2026-11-06:** `.github/workflows/deploy.yml` runs unit tests and the build on every push to `main`, then deploys `dist/` to GitHub Pages. End-to-end tests run in a separate, non-blocking job until they are confirmed stable on Linux (the fixtures use whichever handwriting-like font the runner has). Repo made public with the user's go-ahead.
 - The GitHub Actions workflow and Pages setup, after the user approves.
 
 ### M5: Polish (phase 2)
-- Per-glyph adjustments: scale, baseline shift, left/right sidebearings, and a "re-trace with different smoothing" option. (Ink sensitivity, stroke thickness and smoothing per letter were done early on 2026-11-06; scale, baseline shift and sidebearings remain.)
-- Save ink settings and per-letter overrides with the project (IndexedDB autosave); today they reset on reload.
-- PDF scan input via `pdfjs-dist`.
+- Per-glyph adjustments: ~~baseline shift~~, ~~left/right sidebearings~~ (done 2026-11-06 as Move up/down, Space before, Space after), ~~re-trace with different smoothing~~ (done). **Remaining:** per-glyph scale.
+- ~~Save ink settings and per-letter overrides with the project (IndexedDB autosave).~~ Done 2026-11-06: images and every setting are saved in the browser and restored on load; "Start over" clears them.
+- PDF scan input via `pdfjs-dist`. **Remaining.**
 - ~~Stroke weight adjustment (dilate/erode before tracing).~~ Done early (2026-11-06) as the Stroke thickness slider, global and per letter.
-- Project export/import as a file, in addition to the IndexedDB autosave.
+- Project export/import as a file, in addition to the IndexedDB autosave. **Remaining** (useful for moving a project between computers).
 - **Grayscale printing support** (user request, 2026-11-06). A template printed in grayscale left guide lines in the scan: the printer turns light blue into gray, often as halftone dots, which threshold as ink. For now the app tells users to print in color. Candidate fixes, roughly cheapest first; test each against a real grayscale-printed scan (ask the user for one and add it to `tests/fixtures/real/`):
   1. Blur or median-filter each cell crop slightly before thresholding, so halftone dots average into a light, uniform gray that falls above the ink cutoff, while felt-tip strokes stay dark.
   2. Erase lines at known positions: after warping, every guide's y position is known from `layout.ts`. Remove thin horizontal runs in those bands (morphological opening with a long horizontal kernel), keeping pixels where a pen stroke crosses (ink thicker than the guide line).
@@ -243,10 +244,13 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 - **Review drawer:** clicking a letter opens a fixed bottom drawer (page doesn't scroll) with scan / ink / outline, per-letter sliders, Revert to default, Apply to all letters, Mark for redo, Prev/Next, Esc to close.
 - **Preview:** buttons insert – — § • … ‘ ’ “ ”.
 - **Dev only:** "Load samples (dev)" loads `samples/*color*` via a dev-server-only Vite plugin; never in builds.
-- **Still to do:** saving the project (IndexedDB autosave) so redo sheets work across sessions without re-uploading the originals.
+- ~~Saving the project~~ done (autosave).
 
 ### M6: Variants and ligatures (phase 3)
 - **Start with a feasibility check:** can `opentype.js` write GSUB `calt` (contextual alternates) and `liga` lookups that Word and browsers honor? If not, write up options for the user, such as fontTools via Pyodide, before building anything.
+- **Feasibility result (2026-11-06):** yes for ligatures. opentype.js 2.0 writes GSUB lookup types 1–6. Its `substitution.add()` helper covers `liga`, `dlig`, `rlig`, `ccmp`, `salt` and `ssXX` (not `calt`); features must be added in alphabetical order. Tested in Chrome: a `liga` f+i ligature renders by default and a `dlig` t+h ligature renders when `dlig` is on. `calt` needs hand-built chained-context lookups (type 6), which the writer supports but the helper doesn't.
+- **Proposed design:** a "ligature sheet" template where the user lists letter sequences (e.g. th, oo, tt, ing). Each gets a wider cell (2–3 normal widths) on the same baseline grid, encoded with a sheet number in a free page-ID range (8–15) plus the sequence list saved in the project (or printed as labels and confirmed after upload). Glyphs named like `t_h`, added as `liga` (always on in browsers; Word: Font → Advanced → Ligatures "Standard Only") or `dlig` (Word: "All"). A per-ligature toggle chooses standard vs discretionary.
+- Word note: ligatures are **off by default** in Word. Font → Advanced → Ligatures: "Standard Only" turns on `liga`; "All" also turns on `dlig`.
 - Note for the user docs: Word turns contextual alternates off by default. They're enabled under Font → Advanced → "Use Contextual Alternates".
 
 ---
@@ -309,3 +313,7 @@ Keep styling simple and accessible: keyboard-navigable, with clear text contrast
 | 2026-11-06 | Generated Bold = Regular cells re-traced with thicker strokes in the worker; generated Italic = outline slant at build time | Reuses the ink pipeline (handles holes and joins naturally) and costs nothing for italics. Cursive written sets still can't join letters (needs contextual alternates, M6) |
 | 2026-11-06 | Re-uploading a page merges instead of replacing: per box, the newest upload with writing wins | Makes partial redo sheets and "just rewrite a few boxes" work with no extra encoding |
 | 2026-11-06 | "Revert to default" in the drawer removes the letter's own settings; "Apply to all letters" makes them the all-letters settings and clears every per-letter override | Matches the user's request; the global panel shows when it differs from the defaults |
+| 2026-11-06 | Default letter spacing −20 (was 0) | User preference after testing with real handwriting |
+| 2026-11-06 | Per-character position and spacing are build-time metrics (shift and extra sidebearings), separate from ink settings; generated Bold/Italic glyphs use the Regular glyph's metrics | Moves a character without re-tracing it; one adjustment carries to generated styles |
+| 2026-11-06 | Autosave stores the original image files plus settings in IndexedDB (`idb-keyval`) and re-processes them on load, instead of storing processed cells | Small, simple and always consistent with the current pipeline; re-processing takes a few seconds |
+| 2026-11-06 | Redo sheets keep the standard box positions (not packed onto one line) | Position is how the app knows which character is in a box; a packed sheet would only be readable by the browser that printed it (the page ID has no room for a character list). Revisit if paper use matters |

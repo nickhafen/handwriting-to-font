@@ -12,6 +12,7 @@ includes the following third-party packages, each under its own license.
 | [pdf-lib](https://github.com/Hopding/pdf-lib) | MIT | Generates the template PDF |
 | [svgpath](https://github.com/fontello/svgpath) | MIT | Converts traced SVG paths to absolute coordinates |
 | [React](https://github.com/facebook/react) | MIT | User interface |
+| [idb-keyval](https://github.com/jakearchibald/idb-keyval) | Apache-2.0 | Saves your project in the browser (IndexedDB) |
 
 ## Development and testing only (not shipped)
 

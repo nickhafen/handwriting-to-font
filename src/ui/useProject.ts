@@ -3,10 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   assembleGlyphs,
+  DEFAULT_FONT_SETTINGS,
   DEFAULT_GENERATE,
   effectiveGlyphs,
+  glyphKey,
+  isDefaultMetrics,
   mergeUploads,
+  type FontSettings,
   type GenerateSettings,
+  type GlyphMetrics,
   type GlyphsByStyle,
 } from '../core/project'
 import { DEFAULT_ADJUST, sameAdjust, type InkAdjust } from '../core/scan/adjust'
@@ -15,13 +20,16 @@ import type { PageScan } from '../core/scan/processPage'
 import { TEMPLATE_PAGES } from '../core/template/charset'
 import { CELLS_PER_PAGE, TEMPLATE_VERSION } from '../core/template/layout'
 import { slotOf, STYLE_IDS, type Slot, type StyleId } from '../core/template/styles'
+import { clearProject, loadProject, saveProject, type SavedProject } from './persist'
 import { retraceCells, ScanFailure, scanFile } from './scanClient'
+import { DEFAULT_PREVIEW_SIZE, DEFAULT_PREVIEW_TEXT } from './sampleText'
 
 /** Below this the page-ID reading is too doubtful to trust without asking. */
 const MIN_ID_CONFIDENCE = 0.25
 const GLOBAL_DEBOUNCE_MS = 400
 const LETTER_DEBOUNCE_MS = 250
 const BOLD_DEBOUNCE_MS = 500
+const SAVE_DEBOUNCE_MS = 600
 
 export interface Upload {
   key: number
@@ -40,7 +48,7 @@ export interface Upload {
 
 let nextKey = 1
 
-export const overrideKey = (style: StyleId, char: string) => `${style}:${char}`
+export const overrideKey = glyphKey
 
 /** The character in a grid cell of a template page, if any. */
 const charAt = (page: number, cellIndex: number) => TEMPLATE_PAGES[page]?.cells[cellIndex]?.char
@@ -60,6 +68,13 @@ export interface ProjectState {
   generate: GenerateSettings
   /** Characters marked for a redo sheet, as overrideKey(style, char). */
   redo: Set<string>
+  /** Per-character position and spacing, as glyphKey(style, char). */
+  metrics: Record<string, GlyphMetrics>
+  font: FontSettings
+  previewText: string
+  previewSize: number
+  /** Set after loading a saved project: how many images were restored and when they were saved. */
+  restored: { files: number; savedAt: number } | null
   /** Number of background re-trace jobs still running. */
   busy: number
   addFiles(files: File[]): void
@@ -73,6 +88,13 @@ export interface ProjectState {
   setGenerate(g: GenerateSettings): void
   toggleRedo(style: StyleId, char: string): void
   clearRedo(): void
+  /** Set (or with null, clear) one character's position and spacing. */
+  setMetrics(key: string, m: GlyphMetrics | null): void
+  setFont(f: FontSettings): void
+  setPreviewText(t: string): void
+  setPreviewSize(n: number): void
+  /** Delete the saved project and start fresh. */
+  startOver(): Promise<void>
 }
 
 const emptyByStyle = (): GlyphsByStyle => ({
@@ -91,6 +113,16 @@ export function useProject(): ProjectState {
   const [generate, setGenerate] = useState<GenerateSettings>(DEFAULT_GENERATE)
   const [redo, setRedo] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(0)
+  const [metrics, setMetricsState] = useState<Record<string, GlyphMetrics>>({})
+  const [font, setFont] = useState<FontSettings>(DEFAULT_FONT_SETTINGS)
+  const [previewText, setPreviewText] = useState(DEFAULT_PREVIEW_TEXT)
+  const [previewSize, setPreviewSize] = useState(DEFAULT_PREVIEW_SIZE)
+  const [restored, setRestored] = useState<{ files: number; savedAt: number } | null>(null)
+  /** The original image for each upload, kept for autosave. */
+  const files = useRef(new Map<number, File>())
+  /** Restore runs once; saving waits until it has started the restored scans. */
+  const restoreStarted = useRef(false)
+  const loaded = useRef(false)
 
   // Latest values for async callbacks.
   const ref = useRef({ uploads, scans, adjust, overrides, generate })
@@ -153,10 +185,11 @@ export function useProject(): ProjectState {
       return next.size === r.size ? r : next
     })
 
-  const addFiles = useCallback(
-    (files: File[]) => {
-      for (const file of files) {
+  const addFile = useCallback(
+    (file: File, opts: { pickedSlot?: Slot | null; restoring?: boolean } = {}) => {
+      {
         const key = nextKey++
+        files.current.set(key, file)
         const adj = ref.current.adjust
         setUploads((list) => [...list, { key, fileName: file.name, status: 'processing', slot: null, needsPagePick: false, used: 0 }])
         scanFile(file, adj, (stage) => updateUpload(key, { stage }))
@@ -164,9 +197,11 @@ export function useProject(): ProjectState {
             appliedGlobal.current.set(key, adj)
             setScans((m) => new Map(m).set(key, scan))
             const id = scan.pageId
-            const slot = id && id.version === TEMPLATE_VERSION && scan.idConfidence >= MIN_ID_CONFIDENCE ? slotOf(id.pageIndex) : null
-            updateUpload(key, { status: 'done', slot, needsPagePick: !slot })
-            if (slot) clearRedoFor(slot, scan)
+            const detected = id && id.version === TEMPLATE_VERSION && scan.idConfidence >= MIN_ID_CONFIDENCE ? slotOf(id.pageIndex) : null
+            const slot = detected ?? opts.pickedSlot ?? null
+            updateUpload(key, { status: 'done', slot, needsPagePick: !detected })
+            // A restored project already has the right redo marks.
+            if (slot && !opts.restoring) clearRedoFor(slot, scan)
             // State lands before the next tick; then catch up on any settings changed meanwhile.
             setTimeout(() => {
               if (!sameAdjust(adj, ref.current.adjust)) {
@@ -185,7 +220,10 @@ export function useProject(): ProjectState {
     [applyOverrides, retrace, updateUpload],
   )
 
+  const addFiles = useCallback((list: File[]) => list.forEach((f) => addFile(f)), [addFile])
+
   const removeUpload = useCallback((key: number) => {
+    files.current.delete(key)
     setUploads((list) => list.filter((u) => u.key !== key))
     setScans((m) => {
       const next = new Map(m)
@@ -371,7 +409,84 @@ export function useProject(): ProjectState {
   const glyphs = useMemo(() => effectiveGlyphs(written, boldFromRegular, generate), [written, boldFromRegular, generate])
   const uploadedStyles = useMemo(() => new Set(STYLE_IDS.filter((s) => merged.byStyle.get(s)!.size > 0)), [merged])
 
+  // ----------------------------------------------------------- autosave -----
+
+  // Restore once on startup (guarded: React's dev mode runs effects twice).
+  useEffect(() => {
+    if (restoreStarted.current) return
+    restoreStarted.current = true
+    void loadProject().then((p) => {
+      if (p) {
+        setAdjustState(p.adjust)
+        setOverrides(p.overrides)
+        setMetricsState(p.metrics)
+        setGenerate(p.generate)
+        setRedo(new Set(p.redo))
+        setFont(p.font)
+        setPreviewText(p.previewText)
+        setPreviewSize(p.previewSize)
+        // Settings land before the scans start, so each page is processed with them.
+        ref.current.adjust = p.adjust
+        ref.current.overrides = p.overrides
+        for (const sf of p.files) addFile(new File([sf.blob], sf.name, { type: sf.type }), { pickedSlot: sf.pickedSlot, restoring: true })
+        if (p.files.length) setRestored({ files: p.files.length, savedAt: p.savedAt })
+      }
+      loaded.current = true
+    })
+  }, [addFile])
+
+  // Save (debounced) whenever anything worth keeping changes.
+  useEffect(() => {
+    if (!loaded.current) return
+    const timer = setTimeout(() => {
+      const saved: SavedProject = {
+        version: 1,
+        savedAt: Date.now(),
+        files: uploads.flatMap((u) => {
+          const file = files.current.get(u.key)
+          if (!file || u.status === 'error') return []
+          return [{ name: file.name, type: file.type, blob: file, pickedSlot: u.needsPagePick ? u.slot : null }]
+        }),
+        adjust,
+        overrides,
+        metrics,
+        generate,
+        redo: [...redo],
+        font,
+        previewText,
+        previewSize,
+      }
+      void saveProject(saved)
+    }, SAVE_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [uploads, adjust, overrides, metrics, generate, redo, font, previewText, previewSize])
+
+  const setMetrics = useCallback((key: string, m: GlyphMetrics | null) => {
+    setMetricsState((all) => {
+      const next = { ...all }
+      if (m && !isDefaultMetrics(m)) next[key] = m
+      else delete next[key]
+      return next
+    })
+  }, [])
+
+  const startOver = useCallback(async () => {
+    loaded.current = false
+    await clearProject()
+    window.location.reload()
+  }, [])
+
   return {
+    metrics,
+    font,
+    previewText,
+    previewSize,
+    restored,
+    setMetrics,
+    setFont,
+    setPreviewText,
+    setPreviewSize,
+    startOver,
     uploads,
     written,
     glyphs,

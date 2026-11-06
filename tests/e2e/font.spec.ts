@@ -106,9 +106,9 @@ test('build, preview and download a font from two uploaded pages', async ({ page
   expect(font.charToGlyph('‘').path.commands).toEqual(font.charToGlyph("'").path.commands)
   expect(font.charToGlyph('‘').name).toBe('quoteleft')
 
-  // Sidebearings: ink starts 50 units in, and the advance adds 50 on the right.
+  // Sidebearings: 50 units minus the default letter spacing of −20, on each side.
   const o = font.charToGlyph('o')
-  expect(Math.abs(o.getBoundingBox().x1 - 50)).toBeLessThan(2) // coordinates are rounded to whole units
-  expect(Math.abs(o.advanceWidth - (o.getBoundingBox().x2 + 50))).toBeLessThan(2)
+  expect(Math.abs(o.getBoundingBox().x1 - 30)).toBeLessThan(2) // coordinates are rounded to whole units
+  expect(Math.abs(o.advanceWidth - (o.getBoundingBox().x2 + 30))).toBeLessThan(2)
   expect(font.charToGlyph(' ').advanceWidth).toBe(280)
 })

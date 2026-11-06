@@ -135,3 +135,31 @@ describe('merging uploads and generated styles', () => {
     expect(f.tables.post.italicAngle).toBe(-12)
   })
 })
+
+describe('per-character position and spacing', () => {
+  it('moves a glyph vertically and adds space on either side, without changing its shape', async () => {
+    const { buildProjectFont, DEFAULT_FONT_SETTINGS } = await import('../../src/core/project')
+    const { parse } = await import('opentype.js')
+    const { ellipse } = await import('../../src/core/font/m0TestGlyphs')
+    const reg = page(1)
+    reg.cells = reg.cells.map((c) => (c.empty ? c : { ...c, contours: [ellipse(100, 250, 80, 30, true)] }))
+    const glyphs = assembleGlyphs(new Map([[1, reg]]), 'regular')
+    const settings = { ...DEFAULT_FONT_SETTINGS, letterSpacing: 0 }
+    const plain = parse(buildProjectFont(glyphs, settings).buffer)
+    const moved = parse(
+      buildProjectFont(glyphs, settings, undefined, 'regular', 0, { 'regular:-': { shiftY: -60, spaceBefore: 40, spaceAfter: 25 } }).buffer,
+    )
+    const a = plain.charToGlyph('-')
+    const b = moved.charToGlyph('-')
+    expect(b.getBoundingBox().y1).toBeCloseTo(a.getBoundingBox().y1 - 60, 0)
+    expect(b.getBoundingBox().x1).toBeCloseTo(a.getBoundingBox().x1 + 40, 0)
+    expect(b.advanceWidth).toBe(a.advanceWidth + 65)
+    // Other characters are untouched.
+    expect(moved.charToGlyph('1').advanceWidth).toBe(plain.charToGlyph('1').advanceWidth)
+  })
+
+  it('uses the default letter spacing of −20', async () => {
+    const { DEFAULT_FONT_SETTINGS } = await import('../../src/core/project')
+    expect(DEFAULT_FONT_SETTINGS.letterSpacing).toBe(-20)
+  })
+})
