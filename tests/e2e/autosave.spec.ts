@@ -25,7 +25,7 @@ test('the project, its settings and per-letter changes survive a reload', async 
   const dash = page.getByRole('dialog')
   await dash.locator('#pos-45-shiftY').fill('-60')
   await expect(glyph(page, '-')).toContainText('adjusted')
-  await expect(glyph(page, '-').locator('path')).toHaveAttribute('transform', 'translate(0 60)')
+  await expect(glyph(page, '-').locator('path')).toHaveAttribute('transform', 'translate(0 60) scale(1)')
   await dash.getByRole('button', { name: 'Next letter' }).click() // the en dash
   await page.keyboard.press('Escape')
   await glyph(page, '1').click()
@@ -40,7 +40,7 @@ test('the project, its settings and per-letter changes survive a reload', async 
   await expect(done(page)).toHaveCount(1, { timeout: 60_000 })
   await expect(page.getByTestId('upload-row')).toContainText('Page 2 (numbers and punctuation) detected')
   await expect(glyph(page, '-')).toContainText('adjusted')
-  await expect(glyph(page, '-').locator('path')).toHaveAttribute('transform', 'translate(0 60)')
+  await expect(glyph(page, '-').locator('path')).toHaveAttribute('transform', 'translate(0 60) scale(1)')
   await expect(glyph(page, '1')).toContainText('adjusted')
   await expect(glyph(page, '1')).toContainText('redo')
   await expect(page.getByLabel('Font name')).toHaveValue('Nick Hand')

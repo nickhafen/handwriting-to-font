@@ -1,7 +1,8 @@
 // Scan pipeline steps 2-7 for one page: markers -> warp -> page ID -> cells.
 import { BOX, MARKER_CENTERS, PX_PER_PT, type Corner } from '../template/layout'
 import type { PageId } from '../template/pageIdCodec'
-import { DEFAULT_CELL_SETTINGS, extractAllCells, type CellResult, type CellSettings } from './cells'
+import { ligatureBoxes, ligatureBoxGeometry, ligatureSheetOf } from '../template/ligatures'
+import { DEFAULT_CELL_SETTINGS, extractAllCells, extractBox, type CellResult, type CellSettings } from './cells'
 import { DEFAULT_MARKER_SETTINGS, findMarkers, type MarkerSettings } from './fiducials'
 import { solveHomography, warp, type Point2 } from './homography'
 import type { GrayImage } from './image'
@@ -22,7 +23,7 @@ export interface PageScan {
   idConfidence: number
   /** Marker centers found in the uploaded image (for diagnostics). */
   corners: Record<Corner, Point2>
-  /** All 56 grid cells; which character each one holds depends on the page. */
+  /** All 56 grid cells of a letter page (or every box of a ligature sheet). */
   cells: CellResult[]
 }
 
@@ -49,6 +50,11 @@ export function processPage(
   onStage('page-id')
   const id = readPageId(canonical)
   onStage('cells')
-  const cells = extractAllCells(canonical, settings.cells)
+  // Ligature sheets have their own box layout; everything else is a letter page.
+  const sheet = id.id ? ligatureSheetOf(id.id.pageIndex) : null
+  const cells =
+    sheet !== null
+      ? ligatureBoxes(sheet).map((b) => extractBox(canonical, ligatureBoxGeometry(b), settings.cells))
+      : extractAllCells(canonical, settings.cells)
   return { pageId: id.id, idBits: id.bits, idConfidence: id.confidence, corners, cells }
 }

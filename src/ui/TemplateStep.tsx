@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { CHARSET, TEMPLATE_PAGES } from '../core/template/charset'
 import type { TemplateSheet } from '../core/template/generatePdf'
 import { PAGE_SIZES, TEMPLATE_VERSION, type PageSizeId } from '../core/template/layout'
+import { BLANK_SHEETS, COMMON_SHEET } from '../core/template/ligatures'
 import { STYLES, styleInfo, type StyleId } from '../core/template/styles'
 import { downloadBlob } from './fontFace'
 
@@ -11,6 +12,8 @@ interface Props {
   /** Characters marked for redo, as "style:char". */
   redo: Set<string>
   onClearRedo: () => void
+  /** Ligature sheets already uploaded (0 = common, 1–7 = blank). */
+  ligatureSheetsUploaded: Set<number>
 }
 
 /** Marked characters grouped by style, in charset order. */
@@ -20,7 +23,9 @@ function redoByStyle(redo: Set<string>): { style: StyleId; chars: string[] }[] {
   )
 }
 
-export function TemplateStep({ redo, onClearRedo }: Props) {
+export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Props) {
+  const firstFreeBlank = Array.from({ length: BLANK_SHEETS }, (_, i) => i + 1).find((n) => !ligatureSheetsUploaded.has(n)) ?? 1
+  const [blankSheet, setBlankSheet] = useState(firstFreeBlank)
   const [size, setSize] = useState<PageSizeId>('letter')
   const [style, setStyle] = useState<StyleId>('regular')
   const [extra, setExtra] = useState('')
@@ -168,6 +173,52 @@ export function TemplateStep({ redo, onClearRedo }: Props) {
           </button>
         </div>
         {unknown.length > 0 && <p className="warn">Not on the template: {unknown.join(' ')}</p>}
+      </details>
+
+      <details className="redo-panel ligature-panel">
+        <summary>Ligatures and alternate letter forms (optional)</summary>
+        <p className="note">
+          Ligatures replace a sequence of letters with one shape, so joined letters look the way you write them. The{' '}
+          <b>common sheet</b> has boxes for typical pairs (ff, fi, th, oo, ing…). <b>Blank sheets</b> have 1-, 2- and
+          3-letter boxes for anything else; after uploading, type what each box holds:
+        </p>
+        <ul className="note">
+          <li>
+            <code>th</code>: a ligature; the letters t, h are drawn as this one shape.
+          </li>
+          <li>
+            <code>r[e]</code>: an alternate form; this box is an “e” used after “r”. <code>[o]n</code> is an “o” before
+            “n”.
+          </li>
+        </ul>
+        <div className="row">
+          <button onClick={() => download([{ ligatureSheet: COMMON_SHEET }], 'handwriting-ligatures-common')} disabled={busy}>
+            Download common ligature sheet
+          </button>
+          <label>
+            Blank sheet{' '}
+            <select value={blankSheet} onChange={(e) => setBlankSheet(Number(e.target.value))} aria-label="Blank ligature sheet number">
+              {Array.from({ length: BLANK_SHEETS }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                  {ligatureSheetsUploaded.has(n) ? ' (uploaded)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="secondary"
+            onClick={() => download([{ ligatureSheet: blankSheet }], `handwriting-ligatures-blank-${blankSheet}`)}
+            disabled={busy}
+          >
+            Download blank ligature sheet
+          </button>
+        </div>
+        <p className="note">
+          Each blank sheet has its own number, so different sheets never overwrite each other; uploading the same number
+          again updates just the boxes written on it. In Word, turn ligatures on under Font → Advanced: <b>Ligatures</b>{' '}
+          (“Standard only”, or “All” for discretionary ones) and <b>Use Contextual Alternates</b>.
+        </p>
       </details>
     </section>
   )

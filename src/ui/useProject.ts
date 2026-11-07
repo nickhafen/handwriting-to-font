@@ -3,17 +3,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   assembleGlyphs,
+  assembleLigatures,
   DEFAULT_FONT_SETTINGS,
   DEFAULT_GENERATE,
   effectiveGlyphs,
   glyphKey,
   isDefaultMetrics,
+  ligatureKey,
   mergeUploads,
   type FontSettings,
   type GenerateSettings,
   type GlyphMetrics,
   type GlyphsByStyle,
+  type LigatureGlyph,
+  type LigatureSettings,
 } from '../core/project'
+import type { LigatureFeature } from '../core/font/gsub'
+import { BLANK_SHEETS, ligatureSheetOf } from '../core/template/ligatures'
 import { DEFAULT_ADJUST, sameAdjust, type InkAdjust } from '../core/scan/adjust'
 import type { CellResult } from '../core/scan/cells'
 import type { PageScan } from '../core/scan/processPage'
@@ -44,6 +50,8 @@ export interface Upload {
   needsPagePick: boolean
   /** Characters this upload currently supplies (later uploads of the same page can replace some). */
   used: number
+  /** Set when this is a ligature sheet (0 = common, 1–7 = blank sheets). */
+  ligatureSheet: number | null
 }
 
 let nextKey = 1
@@ -68,6 +76,11 @@ export interface ProjectState {
   generate: GenerateSettings
   /** Characters marked for a redo sheet, as overrideKey(style, char). */
   redo: Set<string>
+  /** Ligature and contextual-alternate boxes from uploaded ligature sheets. */
+  ligatures: LigatureGlyph[]
+  ligatureSheetsUploaded: Set<number>
+  setLigatureText(key: string, text: string): void
+  setLigatureFeature(key: string, feature: LigatureFeature): void
   /** Per-character position and spacing, as glyphKey(style, char). */
   metrics: Record<string, GlyphMetrics>
   font: FontSettings
@@ -114,6 +127,7 @@ export function useProject(): ProjectState {
   const [redo, setRedo] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(0)
   const [metrics, setMetricsState] = useState<Record<string, GlyphMetrics>>({})
+  const [ligatureSettings, setLigatureSettings] = useState<LigatureSettings>({ texts: {}, features: {} })
   const [font, setFont] = useState<FontSettings>(DEFAULT_FONT_SETTINGS)
   const [previewText, setPreviewText] = useState(DEFAULT_PREVIEW_TEXT)
   const [previewSize, setPreviewSize] = useState(DEFAULT_PREVIEW_SIZE)
@@ -137,26 +151,35 @@ export function useProject(): ProjectState {
     [],
   )
 
-  /** Settings that should apply to a cell of a page right now. */
-  const wanted = (slot: Slot | null, cellIndex: number): InkAdjust => {
-    const ch = slot ? charAt(slot.page, cellIndex) : undefined
-    return (slot && ch && ref.current.overrides[overrideKey(slot.style, ch)]) || ref.current.adjust
+  /** Per-character settings key for a cell of an upload (ligature boxes count as Regular "characters"). */
+  const keyFor = (u: Pick<Upload, 'slot' | 'ligatureSheet'> | undefined, cellIndex: number): string | null => {
+    if (!u) return null
+    if (u.ligatureSheet !== null) return overrideKey('regular', ligatureKey(u.ligatureSheet, cellIndex))
+    const ch = u.slot ? charAt(u.slot.page, cellIndex) : undefined
+    return u.slot && ch ? overrideKey(u.slot.style, ch) : null
+  }
+
+  /** Settings that should apply to a cell of an upload right now. */
+  const wanted = (u: Pick<Upload, 'slot' | 'ligatureSheet'> | undefined, cellIndex: number): InkAdjust => {
+    const k = keyFor(u, cellIndex)
+    return (k && ref.current.overrides[k]) || ref.current.adjust
   }
 
   /** Re-process some cells of one upload with `adj`; keep only results that are still wanted. */
   const retrace = useCallback(async (key: number, cellIndices: number[], adj: InkAdjust) => {
     const scan = ref.current.scans.get(key)
-    if (!scan || cellIndices.length === 0) return
+    const indices = cellIndices.filter((i) => i < (scan?.cells.length ?? 0))
+    if (!scan || indices.length === 0) return
     setBusy((n) => n + 1)
     try {
-      const crops = cellIndices.map((i) => scan.cells[i]).map(({ index, width, height, gray }) => ({ index, width, height, gray }))
+      const crops = indices.map((i) => scan.cells[i]).map(({ index, width, height, gray }) => ({ index, width, height, gray }))
       const results = await retraceCells(crops, adj)
-      const slot = ref.current.uploads.find((u) => u.key === key)?.slot ?? null
+      const upload = ref.current.uploads.find((u) => u.key === key)
       setScans((m) => {
         const s = m.get(key)
         if (!s) return m
         const cells: CellResult[] = s.cells.slice()
-        for (const r of results) if (sameAdjust(wanted(slot, r.index), adj)) cells[r.index] = r
+        for (const r of results) if (sameAdjust(wanted(upload, r.index), adj)) cells[r.index] = r
         return new Map(m).set(key, { ...s, cells })
       })
     } finally {
@@ -177,6 +200,14 @@ export function useProject(): ProjectState {
     [retrace],
   )
 
+  /** Bring every adjusted box of a ligature sheet up to date. */
+  const applyLigatureOverrides = (key: number, sheet: number) => {
+    const prefix = overrideKey('regular', `lig:${sheet}:`)
+    for (const [k, adj] of Object.entries(ref.current.overrides)) {
+      if (k.startsWith(prefix)) void retrace(key, [Number(k.slice(prefix.length))], adj)
+    }
+  }
+
   /** A page arrived: clear redo marks for the characters it contains. */
   const clearRedoFor = (slot: Slot, scan: PageScan) =>
     setRedo((r) => {
@@ -191,15 +222,16 @@ export function useProject(): ProjectState {
         const key = nextKey++
         files.current.set(key, file)
         const adj = ref.current.adjust
-        setUploads((list) => [...list, { key, fileName: file.name, status: 'processing', slot: null, needsPagePick: false, used: 0 }])
+        setUploads((list) => [...list, { key, fileName: file.name, status: 'processing', slot: null, needsPagePick: false, used: 0, ligatureSheet: null }])
         scanFile(file, adj, (stage) => updateUpload(key, { stage }))
           .then((scan) => {
             appliedGlobal.current.set(key, adj)
             setScans((m) => new Map(m).set(key, scan))
             const id = scan.pageId
             const detected = id && id.version === TEMPLATE_VERSION && scan.idConfidence >= MIN_ID_CONFIDENCE ? slotOf(id.pageIndex) : null
-            const slot = detected ?? opts.pickedSlot ?? null
-            updateUpload(key, { status: 'done', slot, needsPagePick: !detected })
+            const sheet = id && id.version === TEMPLATE_VERSION && scan.idConfidence >= MIN_ID_CONFIDENCE ? ligatureSheetOf(id.pageIndex) : null
+            const slot = sheet !== null ? null : (detected ?? opts.pickedSlot ?? null)
+            updateUpload(key, { status: 'done', slot, ligatureSheet: sheet, needsPagePick: sheet === null && !detected })
             // A restored project already has the right redo marks.
             if (slot && !opts.restoring) clearRedoFor(slot, scan)
             // State lands before the next tick; then catch up on any settings changed meanwhile.
@@ -209,6 +241,7 @@ export function useProject(): ProjectState {
                 void retrace(key, ALL_CELLS, ref.current.adjust)
               }
               if (slot) applyOverrides(key, slot)
+              if (sheet !== null) applyLigatureOverrides(key, sheet)
             })
           })
           .catch((err: unknown) => {
@@ -248,10 +281,11 @@ export function useProject(): ProjectState {
         const last = appliedGlobal.current.get(u.key)
         if (last && sameAdjust(last, adjust)) continue
         appliedGlobal.current.set(u.key, adjust)
-        const cells = ALL_CELLS.filter((i) => {
-          if (!u.slot) return true
-          const ch = charAt(u.slot.page, i)
-          return ch !== undefined && !ref.current.overrides[overrideKey(u.slot.style, ch)]
+        const count = ref.current.scans.get(u.key)?.cells.length ?? 0
+        const cells = Array.from({ length: count }, (_, i) => i).filter((i) => {
+          if (!u.slot && u.ligatureSheet === null) return true
+          const k = keyFor(u, i)
+          return k !== null && !ref.current.overrides[k]
         })
         void retrace(u.key, cells, adjust)
       }
@@ -263,6 +297,13 @@ export function useProject(): ProjectState {
   const retraceChar = useCallback(
     (style: StyleId, char: string) => {
       const adj = ref.current.overrides[overrideKey(style, char)] ?? ref.current.adjust
+      const lig = /^lig:(\d+):(\d+)$/.exec(char)
+      if (lig) {
+        for (const u of ref.current.uploads) {
+          if (u.status === 'done' && u.ligatureSheet === Number(lig[1])) void retrace(u.key, [Number(lig[2])], adj)
+        }
+        return
+      }
       for (const u of ref.current.uploads) {
         if (u.status !== 'done' || !u.slot || u.slot.style !== style) continue
         const cellIndex = TEMPLATE_PAGES[u.slot.page].cells.findIndex((c) => c?.char === char)
@@ -327,7 +368,17 @@ export function useProject(): ProjectState {
         for (const [k, n] of m.used) used.set(k, n)
       }
     }
-    return { byStyle, used }
+    const ligatureSheets = new Map<number, PageScan>()
+    for (let sheet = 0; sheet <= BLANK_SHEETS; sheet++) {
+      const list = uploads
+        .filter((u) => u.status === 'done' && u.ligatureSheet === sheet && scans.has(u.key))
+        .map((u) => ({ key: u.key, scan: scans.get(u.key)! }))
+      const m = mergeUploads(-1, list, () => true)
+      if (!m) continue
+      ligatureSheets.set(sheet, m.scan)
+      for (const [k, n] of m.used) used.set(k, n)
+    }
+    return { byStyle, used, ligatureSheets }
   }, [uploads, scans])
 
   // Keep each upload's "characters used" count in sync with the merge.
@@ -366,7 +417,7 @@ export function useProject(): ProjectState {
           // Group cells by the settings they use, so each group is one worker request.
           const groups = new Map<string, { adj: InkAdjust; cells: number[] }>()
           for (const i of charCells(u.slot.page)) {
-            const a = wanted(u.slot, i)
+            const a = wanted(u, i)
             const g = groups.get(JSON.stringify(a)) ?? { adj: a, cells: [] }
             g.cells.push(i)
             groups.set(JSON.stringify(a), g)
@@ -407,6 +458,8 @@ export function useProject(): ProjectState {
   }, [merged])
 
   const glyphs = useMemo(() => effectiveGlyphs(written, boldFromRegular, generate), [written, boldFromRegular, generate])
+  const ligatures = useMemo(() => assembleLigatures(merged.ligatureSheets, ligatureSettings), [merged, ligatureSettings])
+  const ligatureSheetsUploaded = useMemo(() => new Set(merged.ligatureSheets.keys()), [merged])
   const uploadedStyles = useMemo(() => new Set(STYLE_IDS.filter((s) => merged.byStyle.get(s)!.size > 0)), [merged])
 
   // ----------------------------------------------------------- autosave -----
@@ -425,6 +478,7 @@ export function useProject(): ProjectState {
         setFont(p.font)
         setPreviewText(p.previewText)
         setPreviewSize(p.previewSize)
+        if (p.ligatures) setLigatureSettings(p.ligatures)
         // Settings land before the scans start, so each page is processed with them.
         ref.current.adjust = p.adjust
         ref.current.overrides = p.overrides
@@ -455,11 +509,19 @@ export function useProject(): ProjectState {
         font,
         previewText,
         previewSize,
+        ligatures: ligatureSettings,
       }
       void saveProject(saved)
     }, SAVE_DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  }, [uploads, adjust, overrides, metrics, generate, redo, font, previewText, previewSize])
+  }, [uploads, adjust, overrides, metrics, generate, redo, font, previewText, previewSize, ligatureSettings])
+
+  const setLigatureText = useCallback((key: string, text: string) => {
+    setLigatureSettings((l) => ({ ...l, texts: { ...l.texts, [key]: text } }))
+  }, [])
+  const setLigatureFeature = useCallback((key: string, feature: LigatureFeature) => {
+    setLigatureSettings((l) => ({ ...l, features: { ...l.features, [key]: feature } }))
+  }, [])
 
   const setMetrics = useCallback((key: string, m: GlyphMetrics | null) => {
     setMetricsState((all) => {
@@ -477,6 +539,10 @@ export function useProject(): ProjectState {
   }, [])
 
   return {
+    ligatures,
+    ligatureSheetsUploaded,
+    setLigatureText,
+    setLigatureFeature,
     metrics,
     font,
     previewText,

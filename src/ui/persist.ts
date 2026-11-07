@@ -2,7 +2,7 @@
 // browser's IndexedDB, so a reload or a later visit picks up where you left off.
 // Nothing is sent anywhere.
 import { del, get, set } from 'idb-keyval'
-import type { FontSettings, GenerateSettings, GlyphMetrics } from '../core/project'
+import type { FontSettings, GenerateSettings, GlyphMetrics, LigatureSettings } from '../core/project'
 import type { InkAdjust } from '../core/scan/adjust'
 import type { Slot } from '../core/template/styles'
 
@@ -28,6 +28,8 @@ export interface SavedProject {
   font: FontSettings
   previewText: string
   previewSize: number
+  /** Added after the first release; absent in older saves. */
+  ligatures?: LigatureSettings
 }
 
 export async function loadProject(): Promise<SavedProject | null> {

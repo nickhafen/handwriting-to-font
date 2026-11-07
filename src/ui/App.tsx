@@ -12,7 +12,7 @@ export function App() {
       <h1>Handwriting to Font</h1>
       <p>Turn your handwriting into a font you can install and use in Word.</p>
       <p className="note">Everything runs in your browser. Your handwriting never leaves your computer.</p>
-      <TemplateStep redo={project.redo} onClearRedo={project.clearRedo} />
+      <TemplateStep redo={project.redo} onClearRedo={project.clearRedo} ligatureSheetsUploaded={project.ligatureSheetsUploaded} />
       <UploadStep
         uploads={project.uploads}
         onFiles={project.addFiles}
@@ -33,6 +33,9 @@ export function App() {
         onToggleRedo={project.toggleRedo}
         metrics={project.metrics}
         onMetrics={project.setMetrics}
+        ligatures={project.ligatures}
+        onLigatureText={project.setLigatureText}
+        onLigatureFeature={project.setLigatureFeature}
         busy={project.busy > 0}
       />
       <PreviewStep
@@ -41,6 +44,7 @@ export function App() {
         generate={project.generate}
         onGenerate={project.setGenerate}
         metrics={project.metrics}
+        ligatures={project.ligatures}
         settings={project.font}
         onSettings={project.setFont}
         text={project.previewText}

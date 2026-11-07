@@ -17,6 +17,7 @@ There is no server, no account, and no AI model.
    corner squares in view.
 4. **Upload** the images, **review** the letters (adjust ink, position and spacing per letter), then **preview and download** your font. Optional Bold and Italic styles can be written on their own template sets or generated.
    Your project is saved automatically in your browser, so you can come back later and redo a few characters with a redo sheet.
+   Optional ligature sheets add joined letter pairs (th, oo, ing…) and alternate letter forms used in context, e.g. an "e" after "r".
 5. Open the `.otf` file, click **Install**, and restart Word.
 
 ## Development

@@ -22,6 +22,8 @@ export interface InkSpec {
   bottom: number
   /** Ink gray level (default 20). Light values imitate faint pen strokes. */
   gray?: number
+  /** Use this writing area instead of letter cell `cell` (e.g. a ligature box). */
+  writing?: Rect
   /** Horizontal span as fractions of the writing width (default 0.3..0.7). */
   x0?: number
   x1?: number
@@ -49,7 +51,7 @@ export function renderPage(pageIndex: number, dpi: number, inks: InkSpec[], marg
     fill({ x: g.cell.x, y: g.cell.y, w: 1, h: g.cell.h }, GUIDE_GRAY)
   }
   for (const ink of inks) {
-    const wr = cellGeometry(ink.cell).writing
+    const wr = ink.writing ?? cellGeometry(ink.cell).writing
     const y0 = unitsToY(wr, ink.top)
     const y1 = unitsToY(wr, ink.bottom)
     const a = ink.x0 ?? 0.3

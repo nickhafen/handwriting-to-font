@@ -594,3 +594,47 @@ button.link {
 .reset-sliders {
   align-self: center;
 }
+
+.ligature-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ligature-fields {
+  display: flex;
+  gap: 4px;
+}
+
+.ligature-fields input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.ligature-fields select {
+  font-size: 0.8rem;
+}
+
+.ligature-status {
+  font-size: 0.75rem;
+}
+
+.ligature-status.good {
+  color: #17692c;
+}
+
+.ligature-status.good::before {
+  content: none;
+}
+
+.ligature-grid .glyph svg {
+  aspect-ratio: auto;
+}
+
+.ligature-panel code {
+  background: #eef2f8;
+  padding: 0 3px;
+  border-radius: 3px;
+}

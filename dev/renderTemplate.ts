@@ -15,7 +15,10 @@ const only = params.get('page')
 const style = (params.get('style') ?? 'regular') as StyleId
 const chars = params.get('only')
 
-const bytes = await generateTemplatePdf(size, { sheets: [{ style, ...(chars ? { only: [...chars] } : {}) }] })
+const lig = params.get('lig')
+const bytes = await generateTemplatePdf(size, {
+  sheets: [lig !== null ? { ligatureSheet: Number(lig) } : { style, ...(chars ? { only: [...chars] } : {}) }],
+})
 const doc = await pdfjs.getDocument({ data: bytes }).promise
 for (let n = 1; n <= doc.numPages; n++) {
   if (only && Number(only) !== n) continue

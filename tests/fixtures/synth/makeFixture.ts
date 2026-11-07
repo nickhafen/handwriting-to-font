@@ -6,7 +6,8 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { solveHomography, type Point2 } from '../../../src/core/scan/homography'
 import { TEMPLATE_PAGES } from '../../../src/core/template/charset'
 import { generateTemplatePdf } from '../../../src/core/template/generatePdf'
-import { UNITS, boxOriginOnPage, cellGeometry, unitsToY } from '../../../src/core/template/layout'
+import { UNITS, boxOriginOnPage, cellGeometry, unitsToY, type CellGeometry } from '../../../src/core/template/layout'
+import { ligatureBoxes, ligatureBoxGeometry } from '../../../src/core/template/ligatures'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -28,6 +29,10 @@ export interface FixtureSpec {
   format?: 'png' | 'jpeg'
   /** Imitate a light pen: strokes fade from dark at the cap line to light gray at the baseline and below. */
   faint?: boolean
+  /** Make a ligature sheet instead (0 = common, 1–7 = blank); `pageIndex` is then ignored. */
+  ligatureSheet?: number
+  /** What to write in ligature boxes, by box index (default: the common sheet's preset text). */
+  ligatureTexts?: Record<number, string>
   seed?: number
 }
 
@@ -44,9 +49,10 @@ function rng(seed: number) {
   }
 }
 
-async function renderTemplate(pageIndex: number, dpi: number): Promise<HTMLCanvasElement> {
-  const doc = await pdfjs.getDocument({ data: await generateTemplatePdf('letter') }).promise
-  const page = await doc.getPage(pageIndex + 1)
+async function renderTemplate(pageIndex: number, dpi: number, ligatureSheet?: number): Promise<HTMLCanvasElement> {
+  const pdf = await generateTemplatePdf('letter', ligatureSheet === undefined ? {} : { sheets: [{ ligatureSheet }] })
+  const doc = await pdfjs.getDocument({ data: pdf }).promise
+  const page = await doc.getPage(ligatureSheet === undefined ? pageIndex + 1 : 1)
   const viewport = page.getViewport({ scale: dpi / 72 })
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(viewport.width)
@@ -56,7 +62,19 @@ async function renderTemplate(pageIndex: number, dpi: number): Promise<HTMLCanva
 }
 
 /** Write each character in its cell, sitting on the baseline, cap height on the cap line. */
-function writeCharacters(canvas: HTMLCanvasElement, pageIndex: number, dpi: number, skip: Set<string>, faint = false) {
+/** What to write where: letter cells or ligature boxes. */
+function boxesToWrite(spec: FixtureSpec): { g: CellGeometry; text: string }[] {
+  if (spec.ligatureSheet !== undefined) {
+    return ligatureBoxes(spec.ligatureSheet).flatMap((b) => {
+      const text = spec.ligatureTexts?.[b.index] ?? b.preset
+      return text ? [{ g: ligatureBoxGeometry(b), text }] : []
+    })
+  }
+  const skip = new Set(spec.skip ?? [])
+  return TEMPLATE_PAGES[spec.pageIndex].cells.flatMap((info, i) => (info && !skip.has(info.char) ? [{ g: cellGeometry(i), text: info.char }] : []))
+}
+
+function writeCharacters(canvas: HTMLCanvasElement, dpi: number, items: { g: CellGeometry; text: string }[], faint = false) {
   const ctx = canvas.getContext('2d')!
   const s = dpi / 72
   const origin = boxOriginOnPage('letter')
@@ -65,9 +83,8 @@ function writeCharacters(canvas: HTMLCanvasElement, pageIndex: number, dpi: numb
   // Size the font so a capital H reaches the cap line.
   ctx.font = `100px ${HANDWRITING_FONTS}`
   const hAscent = ctx.measureText('H').actualBoundingBoxAscent
-  TEMPLATE_PAGES[pageIndex].cells.forEach((info, i) => {
-    if (!info || skip.has(info.char)) return
-    const g = cellGeometry(i)
+  items.forEach(({ g, text }) => {
+    const info = { char: text }
     const capPx = (unitsToY(g.writing, UNITS.baseline) - unitsToY(g.writing, UNITS.cap)) * s
     let size = (100 * capPx) / hAscent
     ctx.font = `${size}px ${HANDWRITING_FONTS}`
@@ -172,8 +189,8 @@ function photograph(src: HTMLCanvasElement, spec: FixtureSpec): HTMLCanvasElemen
 export async function makeFixture(spec: FixtureSpec): Promise<Blob> {
   const dpi = spec.dpi ?? 300
   await document.fonts.ready
-  const page = await renderTemplate(spec.pageIndex, dpi)
-  writeCharacters(page, spec.pageIndex, dpi, new Set(spec.skip ?? []), spec.faint)
+  const page = await renderTemplate(spec.pageIndex, dpi, spec.ligatureSheet)
+  writeCharacters(page, dpi, boxesToWrite(spec), spec.faint)
   const distorted = spec.rotate || spec.skew || spec.shade || spec.noise || spec.shadow || spec.tint
   const canvas = distorted ? photograph(page, spec) : page
   const type = spec.format === 'jpeg' ? 'image/jpeg' : 'image/png'

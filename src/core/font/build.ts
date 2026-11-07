@@ -1,5 +1,6 @@
 import { Font, Glyph, Path } from 'opentype.js'
 import { contoursBBox, type Contour } from '../geometry'
+import { buildGsub, type LigatureFeature } from './gsub'
 import { placeGlyph, type SpacingSettings } from './metrics'
 
 export const UNITS_PER_EM = 1000
@@ -8,9 +9,10 @@ export const DEFAULT_ASCENDER = 900
 export const DEFAULT_DESCENDER = -300
 
 export interface GlyphInput {
-  /** AGL glyph name, e.g. "a", "zero", "quoteright". */
+  /** AGL glyph name, e.g. "a", "zero", "quoteright"; ligatures like "t_h", alternates like "e.alt1". */
   name: string
-  unicode: number
+  /** Omitted for ligatures and alternates, which are reached only through substitutions. */
+  unicode?: number
   /** Outlines in font units, y-up, baseline at 0. Horizontal position is ignored. */
   contours: Contour[]
   /** Extra font units of space before / after this glyph (added to the sidebearings). */
@@ -26,6 +28,13 @@ export interface FontBuildInput {
   spaceWidth: number
   /** Style within the family. Default: Regular, weight 400, upright. */
   style?: FontStyle
+  /** Ligature and contextual-alternate rules, by glyph name. Rules naming a missing glyph are skipped. */
+  substitutions?: Substitutions
+}
+
+export interface Substitutions {
+  ligatures: { feature: LigatureFeature; components: string[]; glyph: string }[]
+  alternates: { before: string[]; target: string; after: string[]; glyph: string }[]
 }
 
 export interface FontStyle {
@@ -126,6 +135,22 @@ export function buildFont(input: FontBuildInput): BuiltFont {
       },
     },
   })
+
+  if (input.substitutions) {
+    const index = new Map(glyphs.map((g, i) => [g.name, i]))
+    const ids = (names: string[]) => (names.every((n) => index.has(n)) ? names.map((n) => index.get(n)!) : null)
+    const ligatures = input.substitutions.ligatures.flatMap((r) => {
+      const c = ids(r.components)
+      return c && index.has(r.glyph) ? [{ feature: r.feature, components: c, glyph: index.get(r.glyph)! }] : []
+    })
+    const alternates = input.substitutions.alternates.flatMap((r) => {
+      const b = ids(r.before)
+      const a = ids(r.after)
+      return b && a && index.has(r.target) && index.has(r.glyph) ? [{ before: b, target: index.get(r.target)!, after: a, glyph: index.get(r.glyph)! }] : []
+    })
+    const gsub = buildGsub(ligatures, alternates)
+    if (gsub) font.tables.gsub = gsub
+  }
 
   return { buffer: font.toArrayBuffer(), familyName: input.familyName, styleName: style.name }
 }

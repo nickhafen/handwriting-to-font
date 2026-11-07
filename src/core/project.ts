@@ -1,11 +1,13 @@
 // Project model: merging uploaded pages, per-glyph review status, generated
 // Bold/Italic styles, and building fonts. Pure functions only.
-import { buildFont, type BuiltFont, type GlyphInput } from './font/build'
+import { buildFont, type BuiltFont, type GlyphInput, type Substitutions } from './font/build'
+import type { LigatureFeature } from './font/gsub'
 import { DEFAULT_SPACING } from './font/metrics'
 import type { Contour, Point } from './geometry'
 import { suspiciousCells, type CellResult } from './scan/cells'
 import type { PageScan } from './scan/processPage'
 import { CHARSET, TEMPLATE_PAGES, type CharInfo } from './template/charset'
+import { glyphNameOf, ligatureBoxes, ligatureGlyphName, parseLigatureText, type ParsedLigature } from './template/ligatures'
 import { STYLE_IDS, styleInfo, type StyleId } from './template/styles'
 
 /** Merged scans of one style, keyed by template page (0 = letters, 1 = numbers and punctuation). */
@@ -32,6 +34,8 @@ export interface ReviewGlyph {
   usesFallback: boolean
   /** Made from the Regular glyph instead of a written one. */
   generated?: 'thickened' | 'slanted' | 'thickened and slanted'
+  /** Display text when it differs from `info.char` (ligature boxes). */
+  label?: string
 }
 
 /** Where each character lives on the template. */
@@ -90,12 +94,17 @@ export interface MergedPage {
  * character, the newest upload where that box has writing wins; a blank box
  * keeps the earlier version. That's what makes redo sheets work.
  */
-export function mergeUploads(pageIndex: number, uploads: { key: number; scan: PageScan }[]): MergedPage | null {
+export function mergeUploads(
+  pageIndex: number,
+  uploads: { key: number; scan: PageScan }[],
+  /** Which boxes hold something (default: the letter page's character cells). */
+  hasBox: (i: number) => boolean = (i) => !!TEMPLATE_PAGES[pageIndex]?.cells[i],
+): MergedPage | null {
   if (uploads.length === 0) return null
   const latest = uploads[uploads.length - 1]
   const used = new Map<number, number>(uploads.map((u) => [u.key, 0]))
   const cells = latest.scan.cells.map((_, i) => {
-    if (!TEMPLATE_PAGES[pageIndex]?.cells[i]) return latest.scan.cells[i]
+    if (!hasBox(i)) return latest.scan.cells[i]
     for (let k = uploads.length - 1; k >= 0; k--) {
       const cell = uploads[k].scan.cells[i]
       if (!cell.empty) {
@@ -188,11 +197,24 @@ export interface GlyphMetrics {
   /** Extra font units of space before and after the glyph. */
   spaceBefore: number
   spaceAfter: number
+  /** Size multiplier, applied from the baseline (1 = as written). Optional in older saved projects. */
+  scale?: number
 }
 
-export const DEFAULT_METRICS: GlyphMetrics = { shiftY: 0, spaceBefore: 0, spaceAfter: 0 }
+export const DEFAULT_METRICS: GlyphMetrics = { shiftY: 0, spaceBefore: 0, spaceAfter: 0, scale: 1 }
 
-export const isDefaultMetrics = (m?: GlyphMetrics) => !m || (m.shiftY === 0 && m.spaceBefore === 0 && m.spaceAfter === 0)
+export const isDefaultMetrics = (m?: GlyphMetrics) =>
+  !m || (m.shiftY === 0 && m.spaceBefore === 0 && m.spaceAfter === 0 && (m.scale ?? 1) === 1)
+
+/** Scale outlines by `k` from the baseline (y = 0) and the left edge (x = 0; the builder re-spaces glyphs anyway). */
+export function scaleContours(contours: Contour[], k: number): Contour[] {
+  if (k === 1) return contours
+  const t = (p: Point): Point => ({ x: p.x * k, y: p.y * k })
+  return contours.map((c) => ({
+    start: t(c.start),
+    segments: c.segments.map((s) => (s.type === 'L' ? { type: 'L', to: t(s.to) } : { type: 'C', c1: t(s.c1), c2: t(s.c2), to: t(s.to) })),
+  }))
+}
 
 /** Key for per-character settings: "style:char". */
 export const glyphKey = (style: StyleId, char: string) => `${style}:${char}`
@@ -214,7 +236,7 @@ export function glyphInputs(glyphs: ReviewGlyph[], metrics: Record<string, Glyph
   return glyphs.flatMap((g) => {
     if (!usable(g)) return []
     const m = metrics[metricsKeyFor(g)] ?? DEFAULT_METRICS
-    return [{ name: g.info.glyphName, unicode: g.info.unicode, contours: shiftContours(g.outline, m.shiftY), spaceBefore: m.spaceBefore, spaceAfter: m.spaceAfter }]
+    return [{ name: g.info.glyphName, unicode: g.info.unicode || undefined, contours: shiftContours(scaleContours(g.outline, m.scale ?? 1), m.shiftY), spaceBefore: m.spaceBefore, spaceAfter: m.spaceAfter }]
   })
 }
 
@@ -226,16 +248,139 @@ export function buildProjectFont(
   style: StyleId = 'regular',
   slant = 0,
   metrics: Record<string, GlyphMetrics> = {},
+  ligatures: LigatureGlyph[] = [],
 ): BuiltFont {
   const base = settings.familyName.trim() || DEFAULT_FONT_SETTINGS.familyName
   const info = styleInfo(style)
+  const ready = ligatures.filter(ligatureReady)
   return buildFont({
     familyName: suffix ? `${base} ${suffix}` : base,
-    glyphs: glyphInputs(glyphs, metrics),
+    glyphs: [...glyphInputs(glyphs, metrics), ...glyphInputs(ready, metrics)],
+    substitutions: substitutionsFor(ready),
     spacing: { ...DEFAULT_SPACING, letterSpacing: settings.letterSpacing },
     spaceWidth: settings.wordSpacing,
     style: { name: info.label, weight: info.weight, italicAngle: info.italic ? -(slant || DEFAULT_GENERATE.slant) : 0 },
   })
+}
+
+// ------------------------------------------------------------- ligatures ----
+
+export const ligatureKey = (sheet: number, box: number) => `lig:${sheet}:${box}`
+
+export interface LigatureSettings {
+  /** What each box holds, typed by the user (preset on the common sheet), by ligatureKey. */
+  texts: Record<string, string>
+  /** Feature for each ligature box, by ligatureKey. Alternates always use calt. */
+  features: Record<string, LigatureFeature>
+}
+
+export const DEFAULT_LIGATURE_FEATURE: LigatureFeature = 'liga'
+
+export interface LigatureGlyph extends ReviewGlyph {
+  sheet: number
+  box: number
+  text: string
+  parsed: ParsedLigature
+  feature: LigatureFeature
+  /** Another box with the same text is used instead (the newest one wins). */
+  duplicate: boolean
+}
+
+/** Box text: what the user typed, or the common sheet's preset. */
+export function ligatureText(settings: LigatureSettings, sheet: number, box: number): string {
+  const typed = settings.texts[ligatureKey(sheet, box)]
+  return typed ?? ligatureBoxes(sheet)[box]?.preset ?? ''
+}
+
+/** One entry per box of each uploaded ligature sheet, in sheet and box order. */
+export function assembleLigatures(sheets: ReadonlyMap<number, PageScan>, settings: LigatureSettings): LigatureGlyph[] {
+  const out: LigatureGlyph[] = []
+  for (const sheet of [...sheets.keys()].sort((a, b) => a - b)) {
+    const scan = sheets.get(sheet)!
+    for (const box of ligatureBoxes(sheet)) {
+      const cell = scan.cells[box.index]
+      if (!cell) continue
+      const key = ligatureKey(sheet, box.index)
+      const text = ligatureText(settings, sheet, box.index)
+      const parsed = parseLigatureText(text)
+      out.push({
+        info: { char: key, unicode: 0, glyphName: `lig_${sheet}_${box.index}` },
+        label: text || `Box ${box.index + 1}`,
+        style: 'regular',
+        pageIndex: sheet,
+        cell,
+        outline: cell.empty ? [] : cell.contours,
+        pageMissing: false,
+        empty: cell.empty,
+        clipped: !cell.empty && cell.touchesEdge,
+        suspicious: false,
+        usesFallback: false,
+        sheet,
+        box: box.index,
+        text,
+        parsed,
+        feature: parsed.kind === 'alternate' ? 'calt' : (settings.features[key] ?? DEFAULT_LIGATURE_FEATURE),
+        duplicate: false,
+      })
+    }
+  }
+  // Same text in several boxes: the newest (last) one is used.
+  const seen = new Set<string>()
+  for (let i = out.length - 1; i >= 0; i--) {
+    const g = out[i]
+    if (g.empty || (g.parsed.kind !== 'ligature' && g.parsed.kind !== 'alternate')) continue
+    const sig = g.text.trim()
+    if (seen.has(sig)) g.duplicate = true
+    seen.add(sig)
+  }
+  // Glyph names: t_h for ligatures; e.alt1, e.alt2, ... for alternates.
+  const altCount = new Map<string, number>()
+  for (const g of out) {
+    if (g.duplicate || g.empty) continue
+    if (g.parsed.kind === 'ligature') g.info = { ...g.info, glyphName: ligatureGlyphName(g.parsed.chars) }
+    if (g.parsed.kind === 'alternate') {
+      const base = glyphNameOf(g.parsed.target)
+      const n = (altCount.get(base) ?? 0) + 1
+      altCount.set(base, n)
+      g.info = { ...g.info, glyphName: `${base}.alt${n}` }
+    }
+  }
+  return out
+}
+
+/** Has ink, a valid text, and isn't shadowed by a duplicate. */
+export const ligatureReady = (g: LigatureGlyph) =>
+  usable(g) && !g.duplicate && (g.parsed.kind === 'ligature' || g.parsed.kind === 'alternate')
+
+export function substitutionsFor(ready: LigatureGlyph[]): Substitutions {
+  const names = (chars: string[]) => chars.map(glyphNameOf)
+  return {
+    ligatures: ready.flatMap((g) =>
+      g.parsed.kind === 'ligature' ? [{ feature: g.feature, components: names(g.parsed.chars), glyph: g.info.glyphName }] : [],
+    ),
+    alternates: ready.flatMap((g) =>
+      g.parsed.kind === 'alternate'
+        ? [{ before: names(g.parsed.before), target: glyphNameOf(g.parsed.target), after: names(g.parsed.after), glyph: g.info.glyphName }]
+        : [],
+    ),
+  }
+}
+
+/**
+ * Ligatures for each style's font. Ligature sheets are written in Regular; a
+ * fully generated Italic gets them slanted. Bold styles don't get them yet.
+ */
+export function ligaturesForStyle(
+  style: StyleId,
+  ligatures: LigatureGlyph[],
+  writtenStyles: ReadonlySet<StyleId>,
+  gen: GenerateSettings,
+): LigatureGlyph[] {
+  if (style === 'regular') return ligatures
+  if (style === 'italic' && gen.italic && !writtenStyles.has('italic')) {
+    return ligatures.map((g) => ({ ...g, outline: slantContours(g.outline, gen.slant), generated: 'slanted' as const }))
+  }
+  return []
 }
 
 export { STYLE_IDS }

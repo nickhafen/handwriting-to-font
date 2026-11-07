@@ -15,10 +15,12 @@ import {
   TEMPLATE_VERSION,
   boxOriginOnPage,
   cellGeometry,
+  type CellGeometry,
   type PageSizeId,
   type Rect,
 } from './layout'
 import { encodePageId } from './pageIdCodec'
+import { COMMON_SHEET, ligatureBoxes, ligatureBoxGeometry, ligatureSheetName, pageIndexOfLigatureSheet, type LigatureBox } from './ligatures'
 import { pageIndexOf, styleInfo, type StyleId } from './styles'
 
 const BLACK = rgb(0, 0, 0)
@@ -91,13 +93,11 @@ function drawLabel(c: Canvas, info: CharInfo, label: Rect, font: PDFFont) {
   }
 }
 
-function drawCell(c: Canvas, index: number, info: CharInfo, font: PDFFont) {
-  const g = cellGeometry(index)
+/** Box outline, label-strip divider and guide lines for any cell or ligature box. */
+function drawBoxFrame(c: Canvas, g: CellGeometry) {
   c.stroke(g.cell)
   // Line separating the label strip from the writing area.
   c.hline(g.cell.x, g.cell.x + g.cell.w, g.label.y + g.label.h, 0.5)
-  drawLabel(c, info, g.label, font)
-
   const x0 = g.cell.x + INSET
   const x1 = g.cell.x + g.cell.w - INSET
   c.hline(x0, x1, g.guides.cap, 0.5)
@@ -106,10 +106,29 @@ function drawCell(c: Canvas, index: number, info: CharInfo, font: PDFFont) {
   c.hline(x0, x1, g.guides.descender, 0.5)
 }
 
+function drawCell(c: Canvas, index: number, info: CharInfo, font: PDFFont) {
+  const g = cellGeometry(index)
+  drawBoxFrame(c, g)
+  drawLabel(c, info, g.label, font)
+}
+
+function drawLigatureBox(c: Canvas, box: LigatureBox, font: PDFFont) {
+  const g = ligatureBoxGeometry(box)
+  drawBoxFrame(c, g)
+  const baseline = g.label.y + g.label.h - 4
+  if (box.preset) c.text(box.preset, g.label.x + 4, baseline, font, 10, LABEL_GRAY)
+  // Box number at the right, for matching boxes to the text typed in the app.
+  const n = String(box.index + 1)
+  c.text(n, g.label.x + g.label.w - 4 - font.widthOfTextAtSize(n, 6), baseline, font, 6, LABEL_GRAY)
+}
+
 export interface TemplateSheet {
-  style: StyleId
+  /** Letter set to print (ignored for ligature sheets). */
+  style?: StyleId
   /** Only draw boxes for these characters (a redo sheet). Pages with none are skipped. */
   only?: string[]
+  /** Print ligature sheet n instead: 0 = common ligatures, 1–7 = blank sheets. */
+  ligatureSheet?: number
 }
 
 export interface TemplateOptions {
@@ -132,38 +151,51 @@ export async function generateTemplatePdf(size: PageSizeId, options: TemplateOpt
     throw new Error('Template box does not fit the page with 0.5 in margins')
   }
 
+  /** A new page with corner markers, the page-ID strip and a two-line header. */
+  function newPage(pageIndex: number, title: string, note: string): Canvas {
+    const page = doc.addPage([paper.width, paper.height])
+    const c = new Canvas(page, origin.x, origin.y, paper.height)
+    // Corner markers; the top-left one has a white hole so the scanner can tell which way is up.
+    for (const r of Object.values(MARKERS)) c.fill(r)
+    c.fill({ ...MARKER_HOLE_RECT, x: MARKERS.tl.x + MARKER_HOLE_RECT.x, y: MARKERS.tl.y + MARKER_HOLE_RECT.y }, WHITE)
+    // Page-ID strip: filled squares are 1s; empty ones get a light outline.
+    encodePageId({ version: TEMPLATE_VERSION, pageIndex }).forEach((bit, i) => {
+      if (bit) c.fill(ID_SQUARES[i])
+      else c.stroke(ID_SQUARES[i], GUIDE, 0.5)
+    })
+    const fit = (s: string, f: PDFFont, size: number) => Math.min(size, (size * BOX.width) / f.widthOfTextAtSize(s, size))
+    c.text(title, HEADER.x, HEADER.titleBaseline, bold, fit(title, bold, HEADER.titleSize), HEADER_GRAY)
+    c.text(note, HEADER.x, HEADER.noteBaseline, font, fit(note, font, HEADER.noteSize), HEADER_GRAY)
+    return c
+  }
+
   for (const sheet of sheets) {
+    if (sheet.ligatureSheet !== undefined) {
+      const n = sheet.ligatureSheet
+      const title = `Handwriting to Font  ·  ${ligatureSheetName(n)}  ·  Template v${TEMPLATE_VERSION}`
+      const note =
+        n === COMMON_SHEET
+          ? 'Write each sequence the way your letters naturally join. Leave any you don’t want blank.'
+          : 'Write any letter sequence, or one letter’s alternate form. After uploading, type what each box holds.'
+      const c = newPage(pageIndexOfLigatureSheet(n), title, note)
+      for (const box of ligatureBoxes(n)) drawLigatureBox(c, box, font)
+      continue
+    }
+    const styleId = sheet.style ?? 'regular'
     const only = sheet.only ? new Set(sheet.only) : null
-    const style = styleInfo(sheet.style)
+    const style = styleInfo(styleId)
     for (const tp of TEMPLATE_PAGES) {
       const cells = tp.cells.map((info) => (info && (!only || only.has(info.char)) ? info : null))
       if (!cells.some(Boolean)) continue
-      const page = doc.addPage([paper.width, paper.height])
-      const c = new Canvas(page, origin.x, origin.y, paper.height)
-
-      // Corner markers; the top-left one has a white hole so the scanner can tell which way is up.
-      for (const r of Object.values(MARKERS)) c.fill(r)
-      c.fill({ ...MARKER_HOLE_RECT, x: MARKERS.tl.x + MARKER_HOLE_RECT.x, y: MARKERS.tl.y + MARKER_HOLE_RECT.y }, WHITE)
-
-      // Page-ID strip (version + style/page): filled squares are 1s; empty ones get a light outline.
-      encodePageId({ version: TEMPLATE_VERSION, pageIndex: pageIndexOf({ style: sheet.style, page: tp.index }) }).forEach((bit, i) => {
-        if (bit) c.fill(ID_SQUARES[i])
-        else c.stroke(ID_SQUARES[i], GUIDE, 0.5)
-      })
-
-      // Header.
-      const set = sheet.style === 'regular' ? '' : `  ·  ${style.label} set`
+      const set = styleId === 'regular' ? '' : `  ·  ${style.label} set`
       const kind = only ? '  ·  Redo sheet' : ''
       const title = `Handwriting to Font  ·  Page ${tp.index + 1} of ${TEMPLATE_PAGES.length} (${PAGE_TITLES[tp.index]})${set}${kind}  ·  Template v${TEMPLATE_VERSION}`
-      const fit = (s: string, f: PDFFont, size: number) => Math.min(size, (size * BOX.width) / f.widthOfTextAtSize(s, size))
-      c.text(title, HEADER.x, HEADER.titleBaseline, bold, fit(title, bold, HEADER.titleSize), HEADER_GRAY)
       const note = only
         ? 'Print at 100%. Write only in the boxes shown; your new letters replace the earlier ones.'
-        : sheet.style === 'regular'
+        : styleId === 'regular'
           ? 'Print at 100% / Actual size. Use a black felt-tip pen. Sit each character on the solid baseline.'
           : `Print at 100% / Actual size. Write every character in your ${style.label.toLowerCase()} style.`
-      c.text(note, HEADER.x, HEADER.noteBaseline, font, fit(note, font, HEADER.noteSize), HEADER_GRAY)
-
+      const c = newPage(pageIndexOf({ style: styleId, page: tp.index }), title, note)
       cells.forEach((info, i) => info && drawCell(c, i, info, font))
     }
   }

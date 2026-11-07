@@ -169,14 +169,25 @@ export const UNITS_PER_PT = (UNITS.top - UNITS.bottom) / (CELL_H - LABEL_H - 2 *
 
 export function cellGeometry(index: number): CellGeometry {
   if (index < 0 || index >= CELLS_PER_PAGE) throw new RangeError(`cell index ${index} out of range`)
-  const row = Math.floor(index / GRID.cols)
-  const col = index % GRID.cols
-  const cell: Rect = { x: GRID.x + col * CELL_W, y: GRID.y + row * CELL_H, w: CELL_W, h: CELL_H }
-  const label: Rect = { x: cell.x, y: cell.y, w: CELL_W, h: LABEL_H }
+  return spanCellGeometry(index, Math.floor(index / GRID.cols), index % GRID.cols, 1)
+}
+
+/**
+ * A box `span` grid columns wide starting at (row, col): used for ligature
+ * sheets. Same row height, label strip and inset as a letter cell, so the
+ * writing area maps to font units with exactly the same scale.
+ */
+export function spanCellGeometry(index: number, row: number, col: number, span: number): CellGeometry {
+  if (row < 0 || row >= GRID.rows || col < 0 || span < 1 || col + span > GRID.cols) {
+    throw new RangeError(`box at row ${row}, col ${col}, span ${span} is outside the grid`)
+  }
+  const w = span * CELL_W
+  const cell: Rect = { x: GRID.x + col * CELL_W, y: GRID.y + row * CELL_H, w, h: CELL_H }
+  const label: Rect = { x: cell.x, y: cell.y, w, h: LABEL_H }
   const writing: Rect = {
     x: cell.x + INSET,
     y: cell.y + LABEL_H + INSET,
-    w: CELL_W - 2 * INSET,
+    w: w - 2 * INSET,
     h: CELL_H - LABEL_H - 2 * INSET,
   }
   return {

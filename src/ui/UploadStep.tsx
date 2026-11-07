@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { ScanStage } from '../core/scan/processPage'
 import { TEMPLATE_PAGES } from '../core/template/charset'
+import { ligatureSheetName } from '../core/template/ligatures'
 import { slotLabel, STYLES, type Slot } from '../core/template/styles'
 import type { Upload } from './useProject'
 
@@ -125,10 +126,12 @@ export function UploadStep({ uploads, onFiles, onPickSlot, onRemove, restored, o
               <b>{u.fileName}</b>
               {': '}
               {u.status === 'processing' && <span>{u.stage ? STAGE_TEXT[u.stage] : 'Waiting…'}</span>}
-              {u.status === 'done' && u.slot && !u.needsPagePick && (
+              {u.status === 'done' && (u.slot || u.ligatureSheet !== null) && !u.needsPagePick && (
                 <span className={u.used ? 'good' : 'muted'}>
-                  {slotLabel(u.slot)} detected.{' '}
-                  {u.used ? `Supplies ${u.used} character${u.used === 1 ? '' : 's'}.` : 'Every character has been replaced by a newer upload.'}
+                  {u.ligatureSheet !== null ? ligatureSheetName(u.ligatureSheet) : slotLabel(u.slot!)} detected.{' '}
+                  {u.used
+                    ? `Supplies ${u.used} ${u.ligatureSheet !== null ? 'box' : 'character'}${u.used === 1 ? '' : u.ligatureSheet !== null ? 'es' : 's'}.`
+                    : 'Every character has been replaced by a newer upload.'}
                 </span>
               )}
               {u.status === 'done' && u.needsPagePick && (

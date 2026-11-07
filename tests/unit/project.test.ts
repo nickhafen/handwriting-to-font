@@ -163,3 +163,24 @@ describe('per-character position and spacing', () => {
     expect(DEFAULT_FONT_SETTINGS.letterSpacing).toBe(-20)
   })
 })
+
+describe('per-character size', () => {
+  it('scales a glyph from the baseline, keeping it on the line', async () => {
+    const { buildProjectFont, DEFAULT_FONT_SETTINGS } = await import('../../src/core/project')
+    const { parse } = await import('opentype.js')
+    const { ellipse } = await import('../../src/core/font/m0TestGlyphs')
+    const reg = page(0)
+    // An "o"-like shape sitting on the baseline: y from 0 to 480.
+    reg.cells = reg.cells.map((c) => (c.empty ? c : { ...c, contours: [ellipse(200, 240, 180, 240, true)] }))
+    const glyphs = assembleGlyphs(new Map([[0, reg]]), 'regular')
+    const plain = parse(buildProjectFont(glyphs, DEFAULT_FONT_SETTINGS).buffer).charToGlyph('a').getBoundingBox()
+    const big = parse(
+      buildProjectFont(glyphs, DEFAULT_FONT_SETTINGS, undefined, 'regular', 0, { 'regular:a': { shiftY: 0, spaceBefore: 0, spaceAfter: 0, scale: 1.25 } }).buffer,
+    )
+      .charToGlyph('a')
+      .getBoundingBox()
+    expect(big.y1).toBeCloseTo(plain.y1, 0) // still on the baseline
+    expect(big.y2).toBeCloseTo(plain.y2 * 1.25, -1)
+    expect(big.x2 - big.x1).toBeCloseTo((plain.x2 - plain.x1) * 1.25, -1)
+  })
+})

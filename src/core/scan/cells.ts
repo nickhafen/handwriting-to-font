@@ -1,7 +1,7 @@
 // Crop each cell's writing area from the canonical page, threshold it, clean it, and flag problems.
 import type { Contour } from '../geometry'
 import type { CharInfo } from '../template/charset'
-import { CELLS_PER_PAGE, PX_PER_PT, UNITS, UNITS_PER_PT, cellGeometry } from '../template/layout'
+import { CELLS_PER_PAGE, PX_PER_PT, UNITS, UNITS_PER_PT, cellGeometry, type CellGeometry } from '../template/layout'
 import { removeSpecks } from './components'
 import { crop, percentile, type GrayImage } from './image'
 import { adjustThickness, detectGuideRows, hysteresis, normalizeBackground } from './inkMask'
@@ -80,7 +80,13 @@ function guideBandRows(h: number): boolean[] {
 }
 
 export function extractCell(canonical: GrayImage, index: number, settings: CellSettings): CellResult {
-  const r = cellGeometry(index).writing
+  return extractBox(canonical, cellGeometry(index), settings)
+}
+
+/** Crop and analyze any box (a letter cell or a wider ligature box). */
+export function extractBox(canonical: GrayImage, geometry: CellGeometry, settings: CellSettings): CellResult {
+  const index = geometry.index
+  const r = geometry.writing
   const x0 = Math.round(r.x * PX_PER_PT)
   const y0 = Math.round(r.y * PX_PER_PT)
   const w = Math.round(r.w * PX_PER_PT)
