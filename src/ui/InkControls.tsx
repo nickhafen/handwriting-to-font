@@ -1,22 +1,11 @@
 import { ADJUST_RANGES, type InkAdjust } from '../core/scan/adjust'
+import { SliderRow } from './SliderRow'
 
-const LABELS: Record<keyof InkAdjust, { label: string; hint: string; format: (v: number) => string }> = {
-  sensitivity: {
-    label: 'Ink sensitivity',
-    hint: 'Higher picks up fainter parts of strokes',
-    format: (v) => String(v),
-  },
-  thickness: {
-    label: 'Stroke thickness',
-    hint: 'Thicken or thin every line',
-    format: (v) => (v > 0 ? `+${v}` : String(v)),
-  },
-  smoothing: {
-    label: 'Smoothing',
-    hint: 'Higher rounds off corners',
-    format: (v) => String(v),
-  },
-}
+const FIELDS: { key: keyof InkAdjust; label: string; hint: string; format: (v: number) => string }[] = [
+  { key: 'sensitivity', label: 'Ink sensitivity', hint: 'Higher picks up fainter parts of strokes', format: String },
+  { key: 'thickness', label: 'Stroke thickness', hint: 'Thicken or thin every line', format: (v) => (v > 0 ? `+${v}` : String(v)) },
+  { key: 'smoothing', label: 'Smoothing', hint: 'Higher rounds off corners', format: String },
+]
 
 interface Props {
   value: InkAdjust
@@ -27,32 +16,19 @@ interface Props {
 
 export function InkControls({ value, onChange, idPrefix }: Props) {
   return (
-    <div className="controls ink-controls">
-      {(Object.keys(LABELS) as (keyof InkAdjust)[]).map((k) => {
-        const { label, hint, format } = LABELS[k]
-        const range = ADJUST_RANGES[k]
-        const id = `${idPrefix}-${k}`
-        return (
-          <label key={k} htmlFor={id}>
-            <span>
-              {label} <output htmlFor={id}>{format(value[k])}</output>
-            </span>
-            <input
-              id={id}
-              type="range"
-              min={range.min}
-              max={range.max}
-              step={range.step}
-              value={value[k]}
-              aria-describedby={`${id}-hint`}
-              onChange={(e) => onChange({ ...value, [k]: Number(e.target.value) })}
-            />
-            <small id={`${id}-hint`} className="note">
-              {hint}
-            </small>
-          </label>
-        )
-      })}
+    <div className="slider-group">
+      {FIELDS.map((f) => (
+        <SliderRow
+          key={f.key}
+          id={`${idPrefix}-${f.key}`}
+          label={f.label}
+          hint={f.hint}
+          {...ADJUST_RANGES[f.key]}
+          value={value[f.key]}
+          display={f.format(value[f.key])}
+          onChange={(v) => onChange({ ...value, [f.key]: v })}
+        />
+      ))}
     </div>
   )
 }

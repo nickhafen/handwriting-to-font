@@ -65,7 +65,8 @@ export function PreviewStep(props: Props) {
   const [previews, setPreviews] = useState<Partial<Record<StyleId, StylePreview>>>({})
   const [hidden, setHidden] = useState<Set<StyleId>>(new Set())
   const [downloaded, setDownloaded] = useState<string[] | null>(null)
-  const [downloadError, setDownloadError] = useState<string | null>(null)
+  /** Problems found when downloading; the user can download anyway. */
+  const [pending, setPending] = useState<{ problems: string[]; files: { name: string; buffer: ArrayBuffer }[]; fontName: string } | null>(null)
   const faces = useRef<PreviewFace[]>([])
   const textRef = useRef<HTMLTextAreaElement>(null)
 
@@ -122,23 +123,29 @@ export function PreviewStep(props: Props) {
     })
   }
 
+  function save(files: { name: string; buffer: ArrayBuffer }[], fontName: string) {
+    setPending(null)
+    files.forEach((f, i) => setTimeout(() => downloadBlob(f.buffer, f.name, 'font/otf'), i * 400))
+    setDownloaded([`Font name “${fontName}”`, ...files.map((f) => f.name)])
+  }
+
   function onDownload() {
-    setDownloadError(null)
+    setDownloaded(null)
     // One build code for the whole family, so Windows links Regular, Bold and Italic together.
     const suffix = settings.addBuildSuffix ? buildSuffix() : undefined
     const files: { name: string; buffer: ArrayBuffer }[] = []
+    const problems: string[] = []
     for (const s of available) {
       const built = buildProjectFont(glyphs[s.id], settings, suffix, s.id, generate.slant, metrics, ligsFor(s.id))
       const report = validateFont(built.buffer, EXPECTED)
-      if (!report.ok) {
-        setDownloadError(`The ${s.label} font failed its checks, so nothing was downloaded: ${report.errors.join(' ')}`)
-        return
-      }
+      for (const e of report.errors) problems.push(available.length > 1 ? `${s.label}: ${e}` : e)
       files.push({ name: `${built.familyName.replace(/[^A-Za-z0-9]+/g, '')}-${s.label.replace(/\s+/g, '')}.otf`, buffer: built.buffer })
     }
-    files.forEach((f, i) => setTimeout(() => downloadBlob(f.buffer, f.name, 'font/otf'), i * 400))
     const base = settings.familyName.trim() || DEFAULT_FONT_SETTINGS.familyName
-    setDownloaded([`Font name “${suffix ? `${base} ${suffix}` : base}”`, ...files.map((f) => f.name)])
+    const fontName = suffix ? `${base} ${suffix}` : base
+    // Problems don't block the download: show them and let the user decide.
+    if (problems.length) setPending({ problems, files, fontName })
+    else save(files, fontName)
   }
 
   if (!available.length) {
@@ -324,16 +331,20 @@ export function PreviewStep(props: Props) {
               <> (missing: {regular.report.missing.map((c) => (c === ' ' ? 'space' : c)).join(' ')})</>
             )}
           </li>
-          <li className={regular.report.errors.length ? 'bad' : 'good'}>
-            {regular.report.errors.length
-              ? regular.report.errors.join(' ')
-              : 'Line height covers every letter, so Windows won’t clip tails or tall letters'}
-          </li>
-          <li className={regular.report.badWinding.length ? 'bad' : 'good'}>
-            {regular.report.badWinding.length
-              ? `Outline direction problems: ${regular.report.badWinding.join(', ')}`
-              : 'Letter holes (o, e, a, 8…) are set up correctly'}
-          </li>
+          {regular.report.errors.length === 0 && (
+            <li className="good">Line height covers every letter, so Windows won’t clip tails or tall letters</li>
+          )}
+          {regular.report.badWinding.length === 0 && <li className="good">Letter holes (o, e, a, 8…) are set up correctly</li>}
+          {regular.report.errors.map((e) => (
+            <li key={e} className="bad">
+              {e}
+            </li>
+          ))}
+          {regular.report.warnings.map((w) => (
+            <li key={w} className="warn">
+              {w}
+            </li>
+          ))}
           <li className={regular.face ? 'good' : 'bad'}>{regular.face ? 'Your browser accepted the font' : 'Your browser rejected the font'}</li>
           {available
             .filter((s) => s.id !== 'regular')
@@ -344,6 +355,7 @@ export function PreviewStep(props: Props) {
                 <li key={s.id} className={ok ? 'good' : 'bad'} data-testid={`check-${s.id}`}>
                   {s.label}: {p?.report ? `${EXPECTED.length - p.report.missing.length} of ${EXPECTED.length} characters` : 'building…'}
                   {p?.report && (ok ? ', all checks pass' : `, ${p.error ?? p.report.errors.join(' ')}`)}
+                  {p?.report && p.report.warnings.length > 0 && ` ${p.report.warnings.join(' ')}`}
                 </li>
               )
             })}
@@ -372,10 +384,22 @@ export function PreviewStep(props: Props) {
         copy. To install: open each downloaded .otf file and click Install, then restart Word.
         {available.length > 1 && ' Your browser may ask permission to download several files.'}
       </p>
-      {downloadError && (
-        <p role="alert" className="bad">
-          {downloadError}
-        </p>
+      {pending && (
+        <div role="alert" className="download-problems" data-testid="download-problems">
+          <b>Before you download:</b>
+          <ul>
+            {pending.problems.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+          <p className="note">Fix these in step 3, or download anyway and accept them.</p>
+          <div className="row">
+            <button onClick={() => save(pending.files, pending.fontName)}>Download anyway</button>
+            <button className="secondary" onClick={() => setPending(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
       {downloaded && (
         <div className="good" role="status" data-testid="downloaded">

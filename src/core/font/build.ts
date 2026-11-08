@@ -1,5 +1,5 @@
 import { Font, Glyph, Path } from 'opentype.js'
-import { contoursBBox, type Contour } from '../geometry'
+import type { Contour } from '../geometry'
 import { buildGsub, type LigatureFeature } from './gsub'
 import { placeGlyph, type SpacingSettings } from './metrics'
 
@@ -102,14 +102,15 @@ export function buildFont(input: FontBuildInput): BuiltFont {
       lsb: input.spacing.lsb + (g.spaceBefore ?? 0),
       rsb: input.spacing.rsb + (g.spaceAfter ?? 0),
     })
-    const bbox = contoursBBox(placed.contours)
-    if (bbox) {
-      yMax = Math.max(yMax, Math.ceil(bbox.yMax))
-      yMin = Math.min(yMin, Math.floor(bbox.yMin))
+    const glyph = new Glyph({ name: g.name, unicode: g.unicode, advanceWidth: placed.advanceWidth, path: toPath(placed.contours) })
+    // Measure the glyph as written (coordinates rounded to whole units), not the
+    // unrounded outline: rounding can move a curve's lowest point a fraction lower.
+    const bb = glyph.getBoundingBox()
+    if (!bb.isEmpty()) {
+      yMax = Math.max(yMax, Math.ceil(bb.y2))
+      yMin = Math.min(yMin, Math.floor(bb.y1))
     }
-    glyphs.push(
-      new Glyph({ name: g.name, unicode: g.unicode, advanceWidth: placed.advanceWidth, path: toPath(placed.contours) }),
-    )
+    glyphs.push(glyph)
   }
 
   const font = new Font({

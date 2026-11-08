@@ -212,4 +212,11 @@ export function spanCellGeometry(index: number, row: number, col: number, span: 
 export const GUIDE_RGB = { r: 0xa4 / 255, g: 0xdd / 255, b: 0xed / 255 }
 /** Gray for the label text. Outside the extracted area, so it only needs to be readable. */
 export const LABEL_GRAY = 0.45
+/**
+ * Organizational lines (box borders, the line under each label) are neutral
+ * gray, and the label strip gets a faint gray fill, so they read differently
+ * from the blue writing guides. Both sit outside the area the scanner reads.
+ */
+export const FRAME_GRAY = 0.7
+export const LABEL_FILL_GRAY = 0.94
 export const HEADER_GRAY = 0.25

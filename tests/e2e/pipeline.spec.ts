@@ -132,7 +132,8 @@ test('upload both pages through the UI and review the glyphs', async ({ page }) 
   // Clicking a glyph shows the original scan next to the cleaned ink.
   await page.locator('[data-testid="glyph"][data-char="g"]').click()
   const drawer = page.getByRole('dialog', { name: 'Details for g' })
-  await expect(drawer).toContainText('Original scan')
+  await expect(drawer).toContainText('Scan')
+  await expect(drawer).toContainText('In the font')
   // The drawer opens without moving the page.
   const y = await page.evaluate(() => window.scrollY)
   await drawer.getByRole('button', { name: 'Next letter' }).click()

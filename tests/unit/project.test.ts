@@ -184,3 +184,27 @@ describe('per-character size', () => {
     expect(big.x2 - big.x1).toBeCloseTo((plain.x2 - plain.x1) * 1.25, -1)
   })
 })
+
+describe('line-height metrics after size and position changes', () => {
+  it('always cover every glyph exactly as written into the font (no false "would be clipped")', async () => {
+    const { buildProjectFont, DEFAULT_FONT_SETTINGS } = await import('../../src/core/project')
+    const { validateFont } = await import('../../src/core/font/validate')
+    const { ellipse } = await import('../../src/core/font/m0TestGlyphs')
+    const reg = page(0)
+    // A tilted ellipse: its lowest and highest points fall partway along curves, like real traced letters.
+    const t = 0.37
+    const rot = (p: { x: number; y: number }) => ({ x: p.x * Math.cos(t) - p.y * Math.sin(t), y: p.x * Math.sin(t) + p.y * Math.cos(t) })
+    const e = ellipse(203.37, 31.7, 141.3, 287.9, true)
+    const tilted = { start: rot(e.start), segments: e.segments.map((sg) => (sg.type === 'C' ? { type: 'C' as const, c1: rot(sg.c1), c2: rot(sg.c2), to: rot(sg.to) } : sg)) }
+    reg.cells = reg.cells.map((c) => (c.empty ? c : { ...c, contours: [tilted] }))
+    const glyphs = assembleGlyphs(new Map([[0, reg]]), 'regular')
+    let seed = 7
+    const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+    for (let i = 0; i < 200; i++) {
+      const m = { shiftY: Math.round(rand() * 500 - 250), spaceBefore: 0, spaceAfter: 0, scale: 0.5 + Math.round(rand() * 30) * 0.05 }
+      const built = buildProjectFont(glyphs, DEFAULT_FONT_SETTINGS, undefined, 'regular', 0, { 'regular:g': m, 'regular:Q': m })
+      const report = validateFont(built.buffer, [])
+      expect(report.errors, JSON.stringify(m)).toEqual([])
+    }
+  })
+})

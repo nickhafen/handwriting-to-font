@@ -15,6 +15,7 @@ import type { CellResult } from '../core/scan/cells'
 import { PX_PER_PT, UNITS, UNITS_PER_PT } from '../core/template/layout'
 import { PAGE_NAMES, STYLES, styleInfo, type StyleId } from '../core/template/styles'
 import { GlyphOutline } from './GlyphOutline'
+import { extentLabel, extentProblem } from './glyphChecks'
 import { InkControls } from './InkControls'
 import { LigatureGrid, ligatureStatus } from './LigatureGrid'
 import { PositionControls } from './PositionControls'
@@ -75,10 +76,11 @@ interface Badge {
   kind: 'bad' | 'warn' | 'info' | 'redo'
 }
 
-function badges(g: ReviewGlyph, adjusted: boolean, redo: boolean): Badge[] {
+function badges(g: ReviewGlyph, adjusted: boolean, redo: boolean, extent: 'above' | 'below' | null = null): Badge[] {
   const out: Badge[] = []
   if (g.empty) out.push({ text: 'empty', kind: 'bad' })
   if (g.clipped) out.push({ text: 'clipped', kind: 'warn' })
+  if (extent) out.push({ text: extentLabel(extent), kind: 'warn' })
   if (g.suspicious) out.push({ text: 'check size', kind: 'warn' })
   if (adjusted) out.push({ text: 'adjusted', kind: 'info' })
   if (redo) out.push({ text: 'redo', kind: 'redo' })
@@ -149,7 +151,7 @@ export function ReviewStep(p: Props) {
   const counts = {
     ready: list.filter(usable).length,
     empty: list.filter((g) => g.empty && !g.generated).length,
-    flagged: list.filter((g) => g.clipped || g.suspicious).length,
+    flagged: list.filter((g) => g.clipped || g.suspicious || extentProblem(g, metrics[metricsKeyFor(g)])).length,
     missing: list.filter((g) => g.pageMissing && !g.generated).length,
   }
   const metricsOf = (g: ReviewGlyph) => metrics[metricsKeyFor(g)]
@@ -162,6 +164,8 @@ export function ReviewStep(p: Props) {
     }
   }
   const globalChanged = !sameAdjust(adjust, DEFAULT_ADJUST)
+  /** Drawer image width: 150 px per letter cell (wider for ligature boxes). */
+  const imgW = sel?.cell ? Math.round((150 * sel.cell.width) / 281) : 150
 
   return (
     <section aria-labelledby="step-review">
@@ -211,10 +215,7 @@ export function ReviewStep(p: Props) {
         <summary>
           Ink settings for all letters{globalChanged && <span className="badge info">changed from default</span>}
         </summary>
-        <p className="note">
-          If parts of letters are missing, raise <b>Ink sensitivity</b>. For bolder letters, raise <b>Stroke thickness</b>.
-          Letters you have adjusted individually keep their own settings.
-        </p>
+        <p className="note">Letters you adjusted individually keep their own settings.</p>
         <InkControls idPrefix="all" value={adjust} onChange={p.onAdjust} />
         <button className="secondary" disabled={!globalChanged} onClick={() => p.onAdjust({ ...DEFAULT_ADJUST })}>
           Reset to defaults
@@ -243,7 +244,7 @@ export function ReviewStep(p: Props) {
             {list
               .filter((g) => g.pageIndex === pageIndex)
               .map((g) => {
-                const b = badges(g, isAdjusted(g), isRedo(g))
+                const b = badges(g, isAdjusted(g), isRedo(g), extentProblem(g, metricsOf(g)))
                 return (
                   <li key={g.info.char}>
                     <button
@@ -286,13 +287,19 @@ export function ReviewStep(p: Props) {
                   : `${styleInfo(sel.style).label} “${sel.info.char}”${sel.info.hint ? ` (${sel.info.hint})` : ''}`}
               </b>
               <span className="badges">
-                {badges(sel, isAdjusted(sel), isRedo(sel)).map((x) => (
+                {badges(sel, isAdjusted(sel), isRedo(sel), extentProblem(sel, metricsOf(sel))).map((x) => (
                   <span key={x.text} className={`badge ${x.kind}`}>
                     {x.text}
                   </span>
                 ))}
               </span>
               <span className="spacer" />
+              {!isLigature(sel) && (
+                <label className="redo-toggle">
+                  <input type="checkbox" checked={isRedo(sel)} onChange={() => p.onToggleRedo(sel.style, sel.info.char)} /> Mark for a
+                  redo sheet
+                </label>
+              )}
               <button className="secondary" onClick={() => step(-1)} disabled={selIndex <= 0} aria-label="Previous letter">
                 ‹ Prev
               </button>
@@ -306,12 +313,12 @@ export function ReviewStep(p: Props) {
             <div className="drawer-body">
               <div className="detail-images">
                 <figure>
-                  <CellCanvas cell={sel.cell} mode="gray" displayWidth={(220 * sel.cell.width) / 281} cssWidth={(220 * sel.cell.width) / 281} />
-                  <figcaption>{sel.generated ? 'Regular scan' : 'Original scan'}</figcaption>
+                  <CellCanvas cell={sel.cell} mode="gray" displayWidth={imgW} cssWidth={imgW} />
+                  <figcaption>{sel.generated ? 'Regular scan' : 'Scan'}</figcaption>
                 </figure>
                 <figure>
-                  <CellCanvas cell={sel.cell} mode="ink" displayWidth={(220 * sel.cell.width) / 281} cssWidth={(220 * sel.cell.width) / 281} />
-                  <figcaption>Cleaned ink</figcaption>
+                  <CellCanvas cell={sel.cell} mode="ink" displayWidth={imgW} cssWidth={imgW} />
+                  <figcaption>Ink</figcaption>
                 </figure>
                 <figure>
                   <GlyphOutline
@@ -319,74 +326,60 @@ export function ReviewStep(p: Props) {
                     className="outline-large"
                     shiftY={metricsOf(sel)?.shiftY}
                     scale={metricsOf(sel)?.scale}
-                    widthUnits={isLigature(sel) ? (sel.cell.width / PX_PER_PT) * UNITS_PER_PT : undefined}
-                    style={isLigature(sel) ? { aspectRatio: `${sel.cell.width} / ${sel.cell.height}`, width: (220 * sel.cell.width) / 281 } : undefined}
+                    widthUnits={(sel.cell.width / PX_PER_PT) * UNITS_PER_PT}
+                    style={{ aspectRatio: `${sel.cell.width} / ${sel.cell.height}`, width: imgW }}
                   />
-                  <figcaption>Outline in the font ({sel.outline.length} contours)</figcaption>
+                  <figcaption>In the font</figcaption>
                 </figure>
+                {sel.usesFallback && <p className="note">Blank, so it uses {sel.info.fallbackFrom}.</p>}
               </div>
-              <div className="letter-adjust">
-                {sel.generated ? (
-                  <p className="note">
-                    Generated from your Regular “{sel.info.char}” ({sel.generated}). Adjust the Regular letter, change the
-                    generation settings in step 4, or upload a written {styleInfo(sel.style).label} set.
-                  </p>
-                ) : (
-                  <>
-                    {sel.usesFallback && (
-                      <p className="note">
-                        This blank character is using {sel.info.fallbackFrom} instead. Adjusting it reprocesses its own
-                        (blank) box.
-                      </p>
-                    )}
+              {sel.generated ? (
+                <p className="note drawer-controls">
+                  Generated from your Regular “{sel.info.char}” ({sel.generated}). Adjust the Regular letter, change the
+                  generation settings in step 4, or upload a written {styleInfo(sel.style).label} set.
+                </p>
+              ) : (
+                <div className="drawer-controls">
+                  <fieldset className="control-group">
+                    <legend>Ink</legend>
                     <InkControls
                       idPrefix={isLigature(sel) ? `lig-${sel.sheet}-${sel.box}` : `letter-${sel.info.unicode}`}
                       value={overrides[overrideKey(sel.style, sel.info.char)] ?? adjust}
                       onChange={(a) => p.onOverride(sel.style, sel.info.char, a)}
                     />
-                    <div className="row">
+                    <div className="group-buttons">
                       <button
-                        className="secondary"
+                        className="secondary small"
                         disabled={!overrides[overrideKey(sel.style, sel.info.char)]}
                         onClick={() => p.onOverride(sel.style, sel.info.char, null)}
                       >
                         Revert to default
                       </button>
-                      <button
-                        className="secondary"
-                        onClick={() => p.onApplyToAll(overrides[overrideKey(sel.style, sel.info.char)] ?? adjust)}
-                      >
+                      <button className="secondary small" onClick={() => p.onApplyToAll(overrides[overrideKey(sel.style, sel.info.char)] ?? adjust)}>
                         Apply to all letters
                       </button>
                     </div>
-                  </>
-                )}
-                <h4 className="position-head">Size, position and spacing</h4>
-                {sel.generated ? (
-                  <p className="note">Uses the position and spacing of the Regular “{sel.info.char}”.</p>
-                ) : (
-                  <>
+                  </fieldset>
+                  <fieldset className="control-group">
+                    <legend>Size and position</legend>
                     <PositionControls
                       idPrefix={isLigature(sel) ? `ligpos-${sel.sheet}-${sel.box}` : `pos-${sel.info.unicode}`}
                       value={metricsOf(sel)}
                       onChange={(m) => p.onMetrics(metricsKeyFor(sel), m)}
                     />
-                    <button
-                      className="secondary"
-                      disabled={isDefaultMetrics(metricsOf(sel))}
-                      onClick={() => p.onMetrics(metricsKeyFor(sel), null)}
-                    >
-                      Reset size, position and spacing
-                    </button>
-                  </>
-                )}
-                {!isLigature(sel) && (
-                <label className="redo-toggle">
-                  <input type="checkbox" checked={isRedo(sel)} onChange={() => p.onToggleRedo(sel.style, sel.info.char)} />{' '}
-                  Mark for a redo sheet (print it in step 1)
-                </label>
-                )}
-              </div>
+                    <div className="group-buttons">
+                      <button
+                        className="secondary small"
+                        disabled={isDefaultMetrics(metricsOf(sel))}
+                        onClick={() => p.onMetrics(metricsKeyFor(sel), null)}
+                        aria-label="Reset size, position and spacing"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  </fieldset>
+                </div>
+              )}
             </div>
           </div>
         </>

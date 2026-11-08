@@ -5,6 +5,7 @@ import { PAGE_SIZES, TEMPLATE_VERSION, type PageSizeId } from '../core/template/
 import { BLANK_SHEETS, COMMON_SHEET } from '../core/template/ligatures'
 import { STYLES, styleInfo, type StyleId } from '../core/template/styles'
 import { downloadBlob } from './fontFace'
+import { loadOnDemand, StalePageError } from './lazy'
 
 const KNOWN = new Set(CHARSET.map((c) => c.char))
 
@@ -31,17 +32,17 @@ export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Prop
   const [extra, setExtra] = useState('')
   const [extraStyle, setExtraStyle] = useState<StyleId>('regular')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ message: string; stale: boolean } | null>(null)
 
   async function makePdf(sheets: TemplateSheet[]): Promise<Uint8Array | null> {
     setError(null)
     setBusy(true)
     try {
       // Loaded on demand: pdf-lib is large and only needed here.
-      const { generateTemplatePdf } = await import('../core/template/generatePdf')
+      const { generateTemplatePdf } = await loadOnDemand(() => import('../core/template/generatePdf'))
       return await generateTemplatePdf(size, { sheets })
     } catch (e) {
-      setError(`Couldn't create the template: ${e}`)
+      setError(e instanceof StalePageError ? { message: e.message, stale: true } : { message: `Couldn't create the PDF: ${e}`, stale: false })
       return null
     } finally {
       setBusy(false)
@@ -75,91 +76,81 @@ export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Prop
   return (
     <section aria-labelledby="step-template">
       <h2 id="step-template">1. Print the template</h2>
-      <div className="row">
-        <fieldset className="row">
-          <legend>Paper size</legend>
-          {(Object.keys(PAGE_SIZES) as PageSizeId[]).map((id) => (
-            <label key={id}>
-              <input type="radio" name="paper" value={id} checked={size === id} onChange={() => setSize(id)} /> {PAGE_SIZES[id].label}
-            </label>
-          ))}
-        </fieldset>
-        <label>
-          Set{' '}
-          <select value={style} onChange={(e) => setStyle(e.target.value as StyleId)}>
-            {STYLES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className="row">
-        <button onClick={() => download([{ style }], setName)} disabled={busy}>
-          Download {style === 'regular' ? 'template' : `${styleInfo(style).label} template`} PDF
-        </button>
-        <button className="secondary" onClick={() => preview([{ style }])} disabled={busy}>
-          Preview in a new tab
-        </button>
-      </div>
-      {error && (
-        <p role="alert" className="bad">
-          {error}
-        </p>
-      )}
-      <ol className="instructions">
-        <li>
-          Print all {TEMPLATE_PAGES.length} pages <b>in color</b> at <b>100% / Actual size</b> (turn off “Fit to page” if
-          you can). The light-blue guide lines are ignored when scanned; grayscale printing can turn them into ink.
-        </li>
-        <li>
-          Use a <b>black felt-tip pen</b>. Ballpoint lines are often too thin and faint.
-        </li>
-        <li>
-          Write each character inside its box. Sit letters on the <b>solid baseline</b>; tall letters reach the top line,
-          and tails (g, p, y) drop toward the bottom line.
-        </li>
-        <li>
-          Scan at <b>300 DPI</b>, or photograph each page <b>flat, in even light</b>, with all four black corner squares
-          in the frame.
-        </li>
-      </ol>
-      <p className="note">
-        The template has {CHARSET.length} characters: page 1 is letters, page 2 is numbers and punctuation. Curly quotes
-        are optional; if you leave them blank, the straight quotes are used instead. <b>Bold, Italic and Bold Italic</b>{' '}
-        sets are optional too: write one with a thicker pen or in cursive, or let the app generate them from your Regular
-        letters (step 4). Each set's pages are recognized automatically.
+      <p>
+        Start with the letters template. Everything else in this step is optional, and you can come back for it later.
       </p>
 
-      <details className="redo-panel" open={marked.length > 0 || undefined}>
-        <summary>Redo a few characters</summary>
-        <p className="note">
-          Print a sheet with boxes only for the characters you want to redo. When you upload it, the new characters replace
-          the old ones; everything else stays as it is. Mark characters in step 3, or type them here.
-        </p>
-        {marked.length > 0 ? (
-          <p data-testid="redo-marked">
-            Marked:{' '}
-            {marked.map((g) => (
-              <span key={g.style} className="redo-group">
-                {g.style !== 'regular' && <b>{styleInfo(g.style).label}: </b>}
-                <span className="redo-chars">{g.chars.join(' ')}</span>
-              </span>
-            ))}{' '}
-            <button className="link" onClick={onClearRedo}>
-              Clear marks
-            </button>
-          </p>
-        ) : (
-          <p className="note">No characters marked yet.</p>
-        )}
-        <div className="row">
-          <label>
-            Also redo <input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="e.g. AgQ&" aria-label="Characters to redo" />
+      <fieldset className="paper-choice">
+        <legend>Paper</legend>
+        {(Object.keys(PAGE_SIZES) as PageSizeId[]).map((id) => (
+          <label key={id} className={size === id ? 'choice selected' : 'choice'}>
+            <input type="radio" name="paper" value={id} checked={size === id} onChange={() => setSize(id)} /> {PAGE_SIZES[id].label}
           </label>
+        ))}
+      </fieldset>
+
+      {error && (
+        <p role="alert" className="bad">
+          {error.message}{' '}
+          {error.stale && (
+            <button className="secondary small" onClick={() => window.location.reload()}>
+              Reload page
+            </button>
+          )}
+        </p>
+      )}
+
+      <div className="template-cards">
+        <article className="card primary">
+          <h3>Letters, numbers and punctuation</h3>
+          <p className="note">
+            {TEMPLATE_PAGES.length} pages, {CHARSET.length} characters. This is the one you need.
+          </p>
           <label>
-            in{' '}
+            Style{' '}
+            <select value={style} onChange={(e) => setStyle(e.target.value as StyleId)}>
+              {STYLES.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.id === 'regular' ? 'Regular (start here)' : `${s.label} (optional)`}
+                </option>
+              ))}
+            </select>
+          </label>
+          {style !== 'regular' && (
+            <p className="note">
+              Write this set in your {styleInfo(style).label.toLowerCase()} style. You can also skip it: the app can
+              generate {styleInfo(style).label} from your Regular letters (step 4).
+            </p>
+          )}
+          <div className="row">
+            <button onClick={() => download([{ style }], setName)} disabled={busy}>
+              Download PDF
+            </button>
+            <button className="secondary" onClick={() => preview([{ style }])} disabled={busy}>
+              Preview
+            </button>
+          </div>
+        </article>
+
+        <article className="card">
+          <h3>Redo sheet</h3>
+          <p className="note">Rewrite a few characters without redoing the whole page. Mark them in step 3, or type them here.</p>
+          {marked.length > 0 && (
+            <p data-testid="redo-marked">
+              Marked:{' '}
+              {marked.map((g) => (
+                <span key={g.style} className="redo-group">
+                  {g.style !== 'regular' && <b>{styleInfo(g.style).label}: </b>}
+                  <span className="redo-chars">{g.chars.join(' ')}</span>
+                </span>
+              ))}
+              <button className="link" onClick={onClearRedo}>
+                Clear
+              </button>
+            </p>
+          )}
+          <div className="row">
+            <input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="e.g. AgQ&" aria-label="Characters to redo" size={10} />
             <select value={extraStyle} onChange={(e) => setExtraStyle(e.target.value as StyleId)} aria-label="Style for typed characters">
               {STYLES.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -167,59 +158,63 @@ export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Prop
                 </option>
               ))}
             </select>
-          </label>
-          <button onClick={() => download(redoSheets, 'handwriting-redo-sheet')} disabled={busy || redoSheets.length === 0}>
-            Download redo sheet
-          </button>
-        </div>
-        {unknown.length > 0 && <p className="warn">Not on the template: {unknown.join(' ')}</p>}
-      </details>
+          </div>
+          {unknown.length > 0 && <p className="warn">Not on the template: {unknown.join(' ')}</p>}
+          <div className="row">
+            <button onClick={() => download(redoSheets, 'handwriting-redo-sheet')} disabled={busy || redoSheets.length === 0}>
+              Download redo sheet
+            </button>
+          </div>
+        </article>
 
-      <details className="redo-panel ligature-panel">
-        <summary>Ligatures and alternate letter forms (optional)</summary>
-        <p className="note">
-          Ligatures replace a sequence of letters with one shape, so joined letters look the way you write them. The{' '}
-          <b>common sheet</b> has boxes for typical pairs (ff, fi, th, oo, ing…). <b>Blank sheets</b> have 1-, 2- and
-          3-letter boxes for anything else; after uploading, type what each box holds:
-        </p>
-        <ul className="note">
-          <li>
-            <code>th</code>: a ligature; the letters t, h are drawn as this one shape.
-          </li>
-          <li>
-            <code>r[e]</code>: an alternate form; this box is an “e” used after “r”. <code>[o]n</code> is an “o” before
-            “n”.
-          </li>
-        </ul>
-        <div className="row">
-          <button onClick={() => download([{ ligatureSheet: COMMON_SHEET }], 'handwriting-ligatures-common')} disabled={busy}>
-            Download common ligature sheet
-          </button>
-          <label>
-            Blank sheet{' '}
+        <article className="card">
+          <h3>Ligatures and alternate forms</h3>
+          <p className="note">
+            Joined letters like <i>th</i>, <i>oo</i> or <i>ing</i>, and letters that change shape next to others (an{' '}
+            <i>e</i> after <i>r</i>).
+          </p>
+          <div className="row">
+            <button className="secondary" onClick={() => download([{ ligatureSheet: COMMON_SHEET }], 'handwriting-ligatures-common')} disabled={busy}>
+              Common ligatures
+            </button>
+          </div>
+          <div className="row">
             <select value={blankSheet} onChange={(e) => setBlankSheet(Number(e.target.value))} aria-label="Blank ligature sheet number">
               {Array.from({ length: BLANK_SHEETS }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
-                  {n}
+                  Blank sheet {n}
                   {ligatureSheetsUploaded.has(n) ? ' (uploaded)' : ''}
                 </option>
               ))}
             </select>
-          </label>
-          <button
-            className="secondary"
-            onClick={() => download([{ ligatureSheet: blankSheet }], `handwriting-ligatures-blank-${blankSheet}`)}
-            disabled={busy}
-          >
-            Download blank ligature sheet
-          </button>
-        </div>
-        <p className="note">
-          Each blank sheet has its own number, so different sheets never overwrite each other; uploading the same number
-          again updates just the boxes written on it. In Word, turn ligatures on under Font → Advanced: <b>Ligatures</b>{' '}
-          (“Standard only”, or “All” for discretionary ones) and <b>Use Contextual Alternates</b>.
-        </p>
-      </details>
+            <button className="secondary" onClick={() => download([{ ligatureSheet: blankSheet }], `handwriting-ligatures-blank-${blankSheet}`)} disabled={busy}>
+              Download
+            </button>
+          </div>
+          <details className="note">
+            <summary>How blank boxes work</summary>
+            After uploading, type what each box holds in step 3: <code>th</code> for a ligature, or <code>r[e]</code> for an
+            “e” used after “r” (<code>[o]n</code>: an “o” before “n”). Each blank sheet has its own number, so sheets never
+            overwrite each other. In Word, turn these on under Font → Advanced: <b>Ligatures</b> and{' '}
+            <b>Use Contextual Alternates</b>.
+          </details>
+        </article>
+      </div>
+
+      <h3 className="tips-head">Filling it in</h3>
+      <ul className="instructions">
+        <li>
+          Print <b>in color at 100% / Actual size</b>. The blue lines are guides the scanner ignores; gray lines just
+          organize the page.
+        </li>
+        <li>
+          Use a <b>black felt-tip pen</b>, and sit each character on the <b>solid blue baseline</b>.
+        </li>
+        <li>
+          Scan at <b>300 DPI</b>, or photograph each page <b>flat, in even light</b>, with all four black corner squares in
+          the picture.
+        </li>
+      </ul>
     </section>
   )
 }

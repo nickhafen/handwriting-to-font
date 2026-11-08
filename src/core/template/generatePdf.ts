@@ -1,8 +1,10 @@
 // Draws the printable template from layout.ts. No geometry is defined here.
-import { PDFDocument, StandardFonts, grayscale, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
+import { PDFDocument, StandardFonts, grayscale, rgb, type Color, type PDFFont, type PDFPage } from 'pdf-lib'
 import { TEMPLATE_PAGES, type CharInfo } from './charset'
 import {
   BOX,
+  FRAME_GRAY,
+  LABEL_FILL_GRAY,
   GUIDE_RGB,
   HEADER,
   HEADER_GRAY,
@@ -26,6 +28,8 @@ import { pageIndexOf, styleInfo, type StyleId } from './styles'
 const BLACK = rgb(0, 0, 0)
 const WHITE = rgb(1, 1, 1)
 const GUIDE = rgb(GUIDE_RGB.r, GUIDE_RGB.g, GUIDE_RGB.b)
+const FRAME = grayscale(FRAME_GRAY)
+const FRAME_FILL = grayscale(LABEL_FILL_GRAY)
 
 const PAGE_TITLES = ['letters', 'numbers and punctuation']
 
@@ -51,11 +55,11 @@ class Canvas {
     return this.pageHeight - (this.oy + y)
   }
 
-  fill(r: Rect, color = BLACK) {
+  fill(r: Rect, color: Color = BLACK) {
     this.page.drawRectangle({ x: this.x(r.x), y: this.y(r.y + r.h), width: r.w, height: r.h, color })
   }
 
-  stroke(r: Rect, color = GUIDE, thickness = 0.75) {
+  stroke(r: Rect, color: Color = GUIDE, thickness = 0.75) {
     this.page.drawRectangle({
       x: this.x(r.x),
       y: this.y(r.y + r.h),
@@ -66,12 +70,12 @@ class Canvas {
     })
   }
 
-  hline(x0: number, x1: number, y: number, thickness: number, dashed = false) {
+  hline(x0: number, x1: number, y: number, thickness: number, dashed = false, color: Color = GUIDE) {
     this.page.drawLine({
       start: { x: this.x(x0), y: this.y(y) },
       end: { x: this.x(x1), y: this.y(y) },
       thickness,
-      color: GUIDE,
+      color,
       ...(dashed && { dashArray: [3, 2.5] }),
     })
   }
@@ -95,9 +99,11 @@ function drawLabel(c: Canvas, info: CharInfo, label: Rect, font: PDFFont) {
 
 /** Box outline, label-strip divider and guide lines for any cell or ligature box. */
 function drawBoxFrame(c: Canvas, g: CellGeometry) {
-  c.stroke(g.cell)
-  // Line separating the label strip from the writing area.
-  c.hline(g.cell.x, g.cell.x + g.cell.w, g.label.y + g.label.h, 0.5)
+  // Structure in gray: a lightly shaded label strip, the box border, and the line under the label.
+  c.fill(g.label, FRAME_FILL)
+  c.stroke(g.cell, FRAME, 0.6)
+  c.hline(g.cell.x, g.cell.x + g.cell.w, g.label.y + g.label.h, 0.5, false, FRAME)
+  // Writing guides in blue.
   const x0 = g.cell.x + INSET
   const x1 = g.cell.x + g.cell.w - INSET
   c.hline(x0, x1, g.guides.cap, 0.5)

@@ -43,6 +43,11 @@ export default defineConfig({
   // GitHub Pages serves the app from /<repo-name>/.
   base: BASE,
   plugins: [react(), devSamples()],
+  // Pre-bundle packages that are only imported on demand, so the dev server
+  // doesn't re-bundle (and reload the page) the first time one is used.
+  optimizeDeps: {
+    include: ['pdf-lib', 'opentype.js', 'svgpath', 'idb-keyval'],
+  },
   test: {
     include: ['tests/unit/**/*.test.ts'],
     environment: 'node',

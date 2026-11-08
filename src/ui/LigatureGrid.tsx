@@ -3,6 +3,7 @@ import { ligatureKey, usable, type GlyphMetrics, type LigatureGlyph } from '../c
 import { PX_PER_PT, UNITS_PER_PT } from '../core/template/layout'
 import { ligatureBoxes, ligatureSheetName } from '../core/template/ligatures'
 import { GlyphOutline } from './GlyphOutline'
+import { extentLabel, extentProblem } from './glyphChecks'
 
 const FEATURES: { id: LigatureFeature; label: string }[] = [
   { id: 'liga', label: 'Standard' },
@@ -67,6 +68,7 @@ export function LigatureGrid({ ligatures, selected, onSelect, onText, onFeature,
                         Box {g.box + 1}
                         {isAdjusted(g) && <span className="badge info">adjusted</span>}
                         {g.clipped && <span className="badge warn">clipped</span>}
+                        {extentProblem(g, m) && <span className="badge warn">{extentLabel(extentProblem(g, m)!)}</span>}
                       </span>
                       {usable(g) ? (
                         <GlyphOutline
