@@ -11,11 +11,12 @@ import {
 } from '../core/project'
 import { ligatureSheetName } from '../core/template/ligatures'
 import { DEFAULT_ADJUST, sameAdjust, type InkAdjust } from '../core/scan/adjust'
-import type { CellResult } from '../core/scan/cells'
+import type { CellResult, CropRect } from '../core/scan/cells'
 import { PX_PER_PT, UNITS, UNITS_PER_PT } from '../core/template/layout'
 import { PAGE_NAMES, STYLES, styleInfo, type StyleId } from '../core/template/styles'
+import { CropFrame } from './CropFrame'
 import { GlyphOutline } from './GlyphOutline'
-import { extentLabel, extentProblem } from './glyphChecks'
+import { extentLabel, extentProblem, inkWidth } from './glyphChecks'
 import { InkControls } from './InkControls'
 import { LigatureGrid, ligatureStatus } from './LigatureGrid'
 import { PositionControls } from './PositionControls'
@@ -106,6 +107,8 @@ interface Props {
   onToggleRedo: (style: StyleId, char: string) => void
   metrics: Record<string, GlyphMetrics>
   onMetrics: (key: string, m: GlyphMetrics | null) => void
+  crops: Record<string, CropRect>
+  onCrop: (style: StyleId, char: string, crop: CropRect | null) => void
   ligatures: LigatureGlyph[]
   onLigatureText: (key: string, text: string) => void
   onLigatureFeature: (key: string, f: LigatureFeature) => void
@@ -155,7 +158,10 @@ export function ReviewStep(p: Props) {
     missing: list.filter((g) => g.pageMissing && !g.generated).length,
   }
   const metricsOf = (g: ReviewGlyph) => metrics[metricsKeyFor(g)]
-  const isAdjusted = (g: ReviewGlyph) => !!overrides[overrideKey(g.style, g.info.char)] || !isDefaultMetrics(metricsOf(g))
+  /** Generated glyphs show the crop of the Regular letter they come from (same key scheme as metrics). */
+  const cropOf = (g: ReviewGlyph) => p.crops[metricsKeyFor(g)] ?? null
+  const isAdjusted = (g: ReviewGlyph) =>
+    !!overrides[overrideKey(g.style, g.info.char)] || !isDefaultMetrics(metricsOf(g)) || (!g.generated && !!cropOf(g))
   const isRedo = (g: ReviewGlyph) => redo.has(overrideKey(g.style, g.info.char))
   const step = (d: number) => {
     // Next/previous glyph that has something to show.
@@ -256,6 +262,7 @@ export function ReviewStep(p: Props) {
                       data-testid="glyph"
                       data-char={g.info.char}
                       data-ink={g.cell?.inkArea ?? 0}
+                      data-ink-width={inkWidth(g.cell)}
                       data-state={g.pageMissing ? 'missing' : g.empty ? 'empty' : 'ok'}
                     >
                       <span className="glyph-char">{g.info.char}</span>
@@ -313,8 +320,23 @@ export function ReviewStep(p: Props) {
             <div className="drawer-body">
               <div className="detail-images">
                 <figure>
-                  <CellCanvas cell={sel.cell} mode="gray" displayWidth={imgW} cssWidth={imgW} />
-                  <figcaption>{sel.generated ? 'Regular scan' : 'Scan'}</figcaption>
+                  <CropFrame crop={cropOf(sel)} disabled={!!sel.generated} onCrop={(c) => p.onCrop(sel.style, sel.info.char, c)}>
+                    <CellCanvas cell={sel.cell} mode="gray" displayWidth={imgW} cssWidth={imgW} />
+                  </CropFrame>
+                  <figcaption>
+                    {sel.generated ? (
+                      'Regular scan'
+                    ) : cropOf(sel) ? (
+                      <>
+                        Scan ·{' '}
+                        <button className="link" onClick={() => p.onCrop(sel.style, sel.info.char, null)}>
+                          Remove crop
+                        </button>
+                      </>
+                    ) : (
+                      'Scan · drag to crop'
+                    )}
+                  </figcaption>
                 </figure>
                 <figure>
                   <CellCanvas cell={sel.cell} mode="ink" displayWidth={imgW} cssWidth={imgW} />

@@ -18,3 +18,7 @@ export function extentProblem(g: ReviewGlyph, m: GlyphMetrics | undefined): 'abo
 }
 
 export const extentLabel = (e: 'above' | 'below') => (e === 'below' ? 'past bottom line' : 'past top line')
+
+/** Width of a cell's ink in pixels (0 if blank); exposed on tiles for tests. */
+export const inkWidth = (cell: { inkBox: { minX: number; maxX: number } | null } | null | undefined) =>
+  cell?.inkBox ? cell.inkBox.maxX - cell.inkBox.minX + 1 : 0

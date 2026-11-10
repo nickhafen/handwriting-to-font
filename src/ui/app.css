@@ -820,3 +820,30 @@ button.small {
 .tips-head {
   margin-top: 1rem;
 }
+
+/* Drag-to-crop on the drawer's scan image. */
+.crop-frame {
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+}
+
+.crop-frame.active {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.crop-rect {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px dashed #1a4f8b;
+  /* Dim everything outside the kept area. */
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.drawer-body figcaption button.link {
+  margin-left: 0;
+  padding: 0;
+  font-size: inherit;
+}

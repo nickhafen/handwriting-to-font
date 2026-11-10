@@ -33,6 +33,8 @@ export interface FixtureSpec {
   ligatureSheet?: number
   /** What to write in ligature boxes, by box index (default: the common sheet's preset text). */
   ligatureTexts?: Record<number, string>
+  /** Boxes (by the text written in them) that also get a stray pen stroke near their right edge. */
+  stray?: string[]
   seed?: number
 }
 
@@ -72,6 +74,21 @@ function boxesToWrite(spec: FixtureSpec): { g: CellGeometry; text: string }[] {
   }
   const skip = new Set(spec.skip ?? [])
   return TEMPLATE_PAGES[spec.pageIndex].cells.flatMap((info, i) => (info && !skip.has(info.char) ? [{ g: cellGeometry(i), text: info.char }] : []))
+}
+
+/** A short vertical stroke near the right edge of a box, separate from the writing (which stays within the middle 80%). */
+function drawStrayMarks(canvas: HTMLCanvasElement, dpi: number, items: { g: CellGeometry; text: string }[], stray: string[]) {
+  const ctx = canvas.getContext('2d')!
+  const s = dpi / 72
+  const origin = boxOriginOnPage('letter')
+  ctx.fillStyle = '#111'
+  for (const { g, text } of items) {
+    if (!stray.includes(text)) continue
+    const x = (origin.x + g.writing.x + g.writing.w * 0.93) * s
+    const top = (origin.y + g.guides.xHeight) * s
+    const bottom = (origin.y + g.guides.baseline) * s
+    ctx.fillRect(x, top, g.writing.w * 0.025 * s, bottom - top)
+  }
 }
 
 function writeCharacters(canvas: HTMLCanvasElement, dpi: number, items: { g: CellGeometry; text: string }[], faint = false) {
@@ -190,7 +207,9 @@ export async function makeFixture(spec: FixtureSpec): Promise<Blob> {
   const dpi = spec.dpi ?? 300
   await document.fonts.ready
   const page = await renderTemplate(spec.pageIndex, dpi, spec.ligatureSheet)
-  writeCharacters(page, dpi, boxesToWrite(spec), spec.faint)
+  const items = boxesToWrite(spec)
+  writeCharacters(page, dpi, items, spec.faint)
+  if (spec.stray) drawStrayMarks(page, dpi, items, spec.stray)
   const distorted = spec.rotate || spec.skew || spec.shade || spec.noise || spec.shadow || spec.tint
   const canvas = distorted ? photograph(page, spec) : page
   const type = spec.format === 'jpeg' ? 'image/jpeg' : 'image/png'

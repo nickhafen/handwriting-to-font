@@ -3,7 +3,7 @@ import { ligatureKey, usable, type GlyphMetrics, type LigatureGlyph } from '../c
 import { PX_PER_PT, UNITS_PER_PT } from '../core/template/layout'
 import { ligatureBoxes, ligatureSheetName } from '../core/template/ligatures'
 import { GlyphOutline } from './GlyphOutline'
-import { extentLabel, extentProblem } from './glyphChecks'
+import { extentLabel, extentProblem, inkWidth } from './glyphChecks'
 
 const FEATURES: { id: LigatureFeature; label: string }[] = [
   { id: 'liga', label: 'Standard' },
@@ -56,7 +56,7 @@ export function LigatureGrid({ ligatures, selected, onSelect, onText, onFeature,
                 const widthUnits = g.cell ? (g.cell.width / PX_PER_PT) * UNITS_PER_PT : undefined
                 const m = metricsOf(g)
                 return (
-                  <li key={key} style={{ gridColumn: `span ${span}` }} className="ligature-tile" data-testid="ligature" data-key={key}>
+                  <li key={key} style={{ gridColumn: `span ${span}` }} className="ligature-tile" data-testid="ligature" data-key={key} data-ink-width={inkWidth(g.cell)}>
                     <button
                       className={`glyph${key === selected ? ' selected' : ''}`}
                       disabled={!g.cell}

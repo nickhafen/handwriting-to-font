@@ -4,6 +4,7 @@
 import { del, get, set } from 'idb-keyval'
 import type { FontSettings, GenerateSettings, GlyphMetrics, LigatureSettings } from '../core/project'
 import type { InkAdjust } from '../core/scan/adjust'
+import type { CropRect } from '../core/scan/cells'
 import type { Slot } from '../core/template/styles'
 
 const KEY = 'handwriting-to-font:project:v1'
@@ -30,6 +31,8 @@ export interface SavedProject {
   previewSize: number
   /** Added after the first release; absent in older saves. */
   ligatures?: LigatureSettings
+  /** Per-letter crops, by glyphKey (added later; absent in older saves). */
+  crops?: Record<string, CropRect>
 }
 
 export async function loadProject(): Promise<SavedProject | null> {

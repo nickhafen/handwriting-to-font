@@ -21,7 +21,7 @@ import {
 import type { LigatureFeature } from '../core/font/gsub'
 import { BLANK_SHEETS, ligatureSheetOf } from '../core/template/ligatures'
 import { DEFAULT_ADJUST, sameAdjust, type InkAdjust } from '../core/scan/adjust'
-import type { CellResult } from '../core/scan/cells'
+import { sameCrop, type CellResult, type CropRect } from '../core/scan/cells'
 import type { PageScan } from '../core/scan/processPage'
 import { TEMPLATE_PAGES } from '../core/template/charset'
 import { CELLS_PER_PAGE, TEMPLATE_VERSION } from '../core/template/layout'
@@ -83,6 +83,10 @@ export interface ProjectState {
   setLigatureFeature(key: string, feature: LigatureFeature): void
   /** Per-character position and spacing, as glyphKey(style, char). */
   metrics: Record<string, GlyphMetrics>
+  /** Per-character crops (ink outside is ignored), as glyphKey(style, char). */
+  crops: Record<string, CropRect>
+  /** Set (or with null, clear) the crop for one character of one style. */
+  setCrop(style: StyleId, char: string, crop: CropRect | null): void
   font: FontSettings
   previewText: string
   previewSize: number
@@ -127,6 +131,7 @@ export function useProject(): ProjectState {
   const [redo, setRedo] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(0)
   const [metrics, setMetricsState] = useState<Record<string, GlyphMetrics>>({})
+  const [crops, setCrops] = useState<Record<string, CropRect>>({})
   const [ligatureSettings, setLigatureSettings] = useState<LigatureSettings>({ texts: {}, features: {} })
   const [font, setFont] = useState<FontSettings>(DEFAULT_FONT_SETTINGS)
   const [previewText, setPreviewText] = useState(DEFAULT_PREVIEW_TEXT)
@@ -139,11 +144,13 @@ export function useProject(): ProjectState {
   const loaded = useRef(false)
 
   // Latest values for async callbacks.
-  const ref = useRef({ uploads, scans, adjust, overrides, generate })
-  ref.current = { uploads, scans, adjust, overrides, generate }
+  const ref = useRef({ uploads, scans, adjust, overrides, generate, crops })
+  ref.current = { uploads, scans, adjust, overrides, generate, crops }
   /** Global settings each upload's cells were last processed with. */
   const appliedGlobal = useRef(new Map<number, InkAdjust>())
   const letterTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  /** Work to run once an upload's new state has rendered (so `ref.current` has its scan and page). */
+  const afterRender = useRef(new Map<number, () => void>())
   const boldSignature = useRef('')
 
   const updateUpload = useCallback(
@@ -165,6 +172,16 @@ export function useProject(): ProjectState {
     return (k && ref.current.overrides[k]) || ref.current.adjust
   }
 
+  /** The crop that should apply to a cell of an upload right now. */
+  const cropFor = (u: Pick<Upload, 'slot' | 'ligatureSheet'> | undefined, cellIndex: number): CropRect | null => {
+    const k = keyFor(u, cellIndex)
+    return (k && ref.current.crops[k]) || null
+  }
+
+  /** Characters with their own ink settings or a crop: these need a re-trace after a scan. */
+  const customizedKeys = () => new Set([...Object.keys(ref.current.overrides), ...Object.keys(ref.current.crops)])
+  const settingsFor = (k: string) => ref.current.overrides[k] ?? ref.current.adjust
+
   /** Re-process some cells of one upload with `adj`; keep only results that are still wanted. */
   const retrace = useCallback(async (key: number, cellIndices: number[], adj: InkAdjust) => {
     const scan = ref.current.scans.get(key)
@@ -172,14 +189,21 @@ export function useProject(): ProjectState {
     if (!scan || indices.length === 0) return
     setBusy((n) => n + 1)
     try {
-      const crops = indices.map((i) => scan.cells[i]).map(({ index, width, height, gray }) => ({ index, width, height, gray }))
-      const results = await retraceCells(crops, adj)
+      const sentFor = ref.current.uploads.find((u) => u.key === key)
+      const requests = indices
+        .map((i) => scan.cells[i])
+        .map(({ index, width, height, gray }) => ({ index, width, height, gray, keep: cropFor(sentFor, index) }))
+      const sentCrop = new Map(requests.map((r) => [r.index, r.keep]))
+      const results = await retraceCells(requests, adj)
       const upload = ref.current.uploads.find((u) => u.key === key)
       setScans((m) => {
         const s = m.get(key)
         if (!s) return m
         const cells: CellResult[] = s.cells.slice()
-        for (const r of results) if (sameAdjust(wanted(upload, r.index), adj)) cells[r.index] = r
+        for (const r of results) {
+          // Keep only results made with the settings and crop the cell should have now.
+          if (sameAdjust(wanted(upload, r.index), adj) && sameCrop(cropFor(upload, r.index), sentCrop.get(r.index))) cells[r.index] = r
+        }
         return new Map(m).set(key, { ...s, cells })
       })
     } finally {
@@ -187,14 +211,14 @@ export function useProject(): ProjectState {
     }
   }, [])
 
-  /** Bring every overridden character on an upload's page up to date. */
+  /** Bring every overridden or cropped character on an upload's page up to date. */
   const applyOverrides = useCallback(
     (key: number, slot: Slot) => {
-      for (const [k, adj] of Object.entries(ref.current.overrides)) {
+      for (const k of customizedKeys()) {
         const [style, ch] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)]
         if (style !== slot.style) continue
         const cellIndex = TEMPLATE_PAGES[slot.page].cells.findIndex((c) => c?.char === ch)
-        if (cellIndex >= 0) void retrace(key, [cellIndex], adj)
+        if (cellIndex >= 0) void retrace(key, [cellIndex], settingsFor(k))
       }
     },
     [retrace],
@@ -203,8 +227,8 @@ export function useProject(): ProjectState {
   /** Bring every adjusted box of a ligature sheet up to date. */
   const applyLigatureOverrides = (key: number, sheet: number) => {
     const prefix = overrideKey('regular', `lig:${sheet}:`)
-    for (const [k, adj] of Object.entries(ref.current.overrides)) {
-      if (k.startsWith(prefix)) void retrace(key, [Number(k.slice(prefix.length))], adj)
+    for (const k of customizedKeys()) {
+      if (k.startsWith(prefix)) void retrace(key, [Number(k.slice(prefix.length))], settingsFor(k))
     }
   }
 
@@ -234,8 +258,8 @@ export function useProject(): ProjectState {
             updateUpload(key, { status: 'done', slot, ligatureSheet: sheet, needsPagePick: sheet === null && !detected })
             // A restored project already has the right redo marks.
             if (slot && !opts.restoring) clearRedoFor(slot, scan)
-            // State lands before the next tick; then catch up on any settings changed meanwhile.
-            setTimeout(() => {
+            // Once that state has rendered, catch up on settings changed meanwhile and per-letter changes.
+            afterRender.current.set(key, () => {
               if (!sameAdjust(adj, ref.current.adjust)) {
                 appliedGlobal.current.set(key, ref.current.adjust)
                 void retrace(key, ALL_CELLS, ref.current.adjust)
@@ -257,6 +281,7 @@ export function useProject(): ProjectState {
 
   const removeUpload = useCallback((key: number) => {
     files.current.delete(key)
+    afterRender.current.delete(key)
     setUploads((list) => list.filter((u) => u.key !== key))
     setScans((m) => {
       const next = new Map(m)
@@ -268,10 +293,20 @@ export function useProject(): ProjectState {
   const pickSlot = useCallback(
     (key: number, slot: Slot) => {
       updateUpload(key, { slot })
-      setTimeout(() => applyOverrides(key, slot))
+      afterRender.current.set(key, () => applyOverrides(key, slot))
     },
     [applyOverrides, updateUpload],
   )
+
+  // Run follow-up work queued above. Effects run after render, when `ref.current` is up to date
+  // (a timer could fire first, and the re-trace would then find no scan for the upload).
+  useEffect(() => {
+    for (const [key, run] of afterRender.current) {
+      if (!ref.current.scans.has(key)) continue
+      afterRender.current.delete(key)
+      run()
+    }
+  }, [scans, uploads])
 
   // Global settings changed: re-trace every non-overridden cell of each upload (debounced).
   useEffect(() => {
@@ -331,6 +366,20 @@ export function useProject(): ProjectState {
           retraceChar(style, char)
         }, LETTER_DEBOUNCE_MS),
       )
+    },
+    [retraceChar],
+  )
+
+  const setCrop = useCallback(
+    (style: StyleId, char: string, crop: CropRect | null) => {
+      const k = overrideKey(style, char)
+      const next = { ...ref.current.crops }
+      if (crop) next[k] = crop
+      else delete next[k]
+      // Update the ref now so the re-trace below already sees the new crop.
+      ref.current.crops = next
+      setCrops(next)
+      retraceChar(style, char)
     },
     [retraceChar],
   )
@@ -401,7 +450,8 @@ export function useProject(): ProjectState {
   useEffect(() => {
     const regular = uploads.filter((u) => u.status === 'done' && u.slot?.style === 'regular' && scans.has(u.key))
     const regOverrides = Object.entries(overrides).filter(([k]) => k.startsWith('regular:'))
-    const sig = JSON.stringify([generate.bold, generate.boldAmount, regular.map((u) => u.key), adjust, regOverrides])
+    const regCrops = Object.entries(crops).filter(([k]) => k.startsWith('regular:'))
+    const sig = JSON.stringify([generate.bold, generate.boldAmount, regular.map((u) => u.key), adjust, regOverrides, regCrops])
     if (!generate.bold || regular.length === 0) {
       boldSignature.current = sig
       return
@@ -424,8 +474,8 @@ export function useProject(): ProjectState {
           }
           const cells = scan.cells.slice()
           for (const { adj, cells: idx } of groups.values()) {
-            const crops = idx.map((i) => scan.cells[i]).map(({ index, width, height, gray }) => ({ index, width, height, gray }))
-            const results = await retraceCells(crops, { ...adj, thickness: adj.thickness + ref.current.generate.boldAmount })
+            const requests = idx.map((i) => scan.cells[i]).map(({ index, width, height, gray }) => ({ index, width, height, gray, keep: cropFor(u, index) }))
+            const results = await retraceCells(requests, { ...adj, thickness: adj.thickness + ref.current.generate.boldAmount })
             for (const r of results) cells[r.index] = r
           }
           if (boldSignature.current !== sig) return // overtaken by a newer change
@@ -436,7 +486,7 @@ export function useProject(): ProjectState {
       }
     }, BOLD_DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  }, [uploads, scans, adjust, overrides, generate.bold, generate.boldAmount])
+  }, [uploads, scans, adjust, overrides, crops, generate.bold, generate.boldAmount])
 
   const boldFromRegular = useMemo(() => {
     if (!generate.bold) return null
@@ -479,9 +529,11 @@ export function useProject(): ProjectState {
         setPreviewText(p.previewText)
         setPreviewSize(p.previewSize)
         if (p.ligatures) setLigatureSettings(p.ligatures)
+        setCrops(p.crops ?? {})
         // Settings land before the scans start, so each page is processed with them.
         ref.current.adjust = p.adjust
         ref.current.overrides = p.overrides
+        ref.current.crops = p.crops ?? {}
         for (const sf of p.files) addFile(new File([sf.blob], sf.name, { type: sf.type }), { pickedSlot: sf.pickedSlot, restoring: true })
         if (p.files.length) setRestored({ files: p.files.length, savedAt: p.savedAt })
       }
@@ -510,11 +562,12 @@ export function useProject(): ProjectState {
         previewText,
         previewSize,
         ligatures: ligatureSettings,
+        crops,
       }
       void saveProject(saved)
     }, SAVE_DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  }, [uploads, adjust, overrides, metrics, generate, redo, font, previewText, previewSize, ligatureSettings])
+  }, [uploads, adjust, overrides, metrics, generate, redo, font, previewText, previewSize, ligatureSettings, crops])
 
   const setLigatureText = useCallback((key: string, text: string) => {
     setLigatureSettings((l) => ({ ...l, texts: { ...l.texts, [key]: text } }))
@@ -544,6 +597,8 @@ export function useProject(): ProjectState {
     setLigatureText,
     setLigatureFeature,
     metrics,
+    crops,
+    setCrop,
     font,
     previewText,
     previewSize,

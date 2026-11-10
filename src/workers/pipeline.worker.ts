@@ -1,6 +1,6 @@
 // Runs the scan pipeline off the main thread so the page stays responsive.
 import { DEFAULT_ADJUST, toCellSettings, toTraceOptions, type InkAdjust } from '../core/scan/adjust'
-import { analyzeCell, type CellResult } from '../core/scan/cells'
+import { analyzeCell, type CellResult, type CropRect } from '../core/scan/cells'
 import { ScanError } from '../core/scan/fiducials'
 import { loadImage } from '../core/scan/load'
 import { DEFAULT_SCAN_SETTINGS, processPage, type PageScan, type ScanStage } from '../core/scan/processPage'
@@ -14,6 +14,8 @@ export interface CellCrop {
   width: number
   height: number
   gray: Uint8Array
+  /** Part of the cell to keep (the rest is ignored), if the user cropped this letter. */
+  keep?: CropRect | null
 }
 
 export type WorkerRequest =
@@ -59,7 +61,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       const trace = toTraceOptions(req.adjust)
       const cells: CellResult[] = []
       for (const c of req.cells) {
-        const cell = analyzeCell({ width: c.width, height: c.height, data: c.gray }, c.index, cellSettings)
+        const cell = analyzeCell({ width: c.width, height: c.height, data: c.gray }, c.index, cellSettings, c.keep ?? null)
         await traceCell(cell, trace)
         cells.push(cell)
       }

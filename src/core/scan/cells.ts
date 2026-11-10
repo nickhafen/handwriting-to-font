@@ -33,6 +33,53 @@ export const DEFAULT_CELL_SETTINGS: CellSettings = {
 /** Half-height (pixels) of the band around each printed guide line where `guideRatio` applies. */
 const GUIDE_BAND = 4
 
+/**
+ * The part of a cell to keep, as fractions (0..1) of its width and height.
+ * Ink outside it is ignored, e.g. a stray pen mark beside the letter.
+ */
+export interface CropRect {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+/** Smallest crop side, as a fraction of the cell; anything smaller is treated as a mis-click. */
+export const MIN_CROP = 0.04
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
+
+/** Order and clamp a crop's corners; null if it is too small to mean anything. */
+export function normalizeCrop(r: CropRect): CropRect | null {
+  const x0 = clamp01(Math.min(r.x0, r.x1))
+  const x1 = clamp01(Math.max(r.x0, r.x1))
+  const y0 = clamp01(Math.min(r.y0, r.y1))
+  const y1 = clamp01(Math.max(r.y0, r.y1))
+  if (x1 - x0 < MIN_CROP || y1 - y0 < MIN_CROP) return null
+  return { x0, y0, x1, y1 }
+}
+
+export function sameCrop(a: CropRect | null | undefined, b: CropRect | null | undefined): boolean {
+  if (!a || !b) return !a && !b
+  return a.x0 === b.x0 && a.y0 === b.y0 && a.x1 === b.x1 && a.y1 === b.y1
+}
+
+/** Clear every pixel outside the crop (in place). */
+function applyCrop(mask: Uint8Array, w: number, h: number, keep: CropRect): void {
+  const x0 = Math.floor(keep.x0 * w)
+  const x1 = Math.ceil(keep.x1 * w)
+  const y0 = Math.floor(keep.y0 * h)
+  const y1 = Math.ceil(keep.y1 * h)
+  for (let y = 0; y < h; y++) {
+    const row = y * w
+    if (y < y0 || y >= y1) mask.fill(0, row, row + w)
+    else {
+      mask.fill(0, row, row + Math.min(w, x0))
+      if (x1 < w) mask.fill(0, row + x1, row + w)
+    }
+  }
+}
+
 export interface InkBox {
   minX: number
   minY: number
@@ -94,8 +141,12 @@ export function extractBox(canonical: GrayImage, geometry: CellGeometry, setting
   return analyzeCell(crop(canonical, x0, y0, w, h), index, settings)
 }
 
-/** Threshold, clean and measure one cell's grayscale writing-area crop. */
-export function analyzeCell(gray: GrayImage, index: number, settings: CellSettings): CellResult {
+/**
+ * Threshold, clean and measure one cell's grayscale writing-area crop.
+ * With `keep`, ink outside that part of the cell is dropped. The paper level
+ * is still measured on the whole cell, so the kept ink is unchanged.
+ */
+export function analyzeCell(gray: GrayImage, index: number, settings: CellSettings, keep: CropRect | null = null): CellResult {
   const { width: w, height: h } = gray
   // Even out shadows first, so "faint" means faint ink, not shaded paper.
   const flat = normalizeBackground(gray)
@@ -112,8 +163,11 @@ export function analyzeCell(gray: GrayImage, index: number, settings: CellSettin
     bandCut: paper * Math.max(settings.inkRatio, settings.guideRatio),
     bandRows: expected.map((v, y) => v || found[y]),
   })
+  if (keep) applyCrop(binary.data, w, h, keep)
   const { image: cleaned } = removeSpecks(binary, settings.speckArea)
   const ink = adjustThickness(cleaned, settings.thickness)
+  // Thickening must not grow back past the crop edge.
+  if (keep) applyCrop(ink.data, w, h, keep)
 
   let inkArea = 0
   let minX = w

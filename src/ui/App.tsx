@@ -33,6 +33,8 @@ export function App() {
         onToggleRedo={project.toggleRedo}
         metrics={project.metrics}
         onMetrics={project.setMetrics}
+        crops={project.crops}
+        onCrop={project.setCrop}
         ligatures={project.ligatures}
         onLigatureText={project.setLigatureText}
         onLigatureFeature={project.setLigatureFeature}
