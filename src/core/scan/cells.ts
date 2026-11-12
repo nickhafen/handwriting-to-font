@@ -4,7 +4,7 @@ import type { CharInfo } from '../template/charset'
 import { CELLS_PER_PAGE, PX_PER_PT, UNITS, UNITS_PER_PT, cellGeometry, type CellGeometry } from '../template/layout'
 import { removeSpecks } from './components'
 import { crop, percentile, type GrayImage } from './image'
-import { adjustThickness, detectGuideRows, hysteresis, normalizeBackground } from './inkMask'
+import { adjustThickness, detectGuideRows, guideLineLimits, hysteresis, normalizeBackground } from './inkMask'
 
 export interface CellSettings {
   /** Definitely ink: darker than this fraction of the cell's paper brightness. */
@@ -13,6 +13,12 @@ export interface CellSettings {
   weakRatio: number
   /** Within a few pixels of a printed guide line, faint ink must be darker than this, so it can't follow the line. */
   guideRatio: number
+  /**
+   * On a row that looks like a printed line, ink must be at least this much darker
+   * (fraction of paper brightness) than the line itself. Matters on grayscale prints,
+   * where guides can come out nearly as dark as ink.
+   */
+  guideMargin: number
   /** Ink blobs smaller than this many pixels (at 300 DPI) are removed as specks. */
   speckArea: number
   /** A cell with less ink than this (pixels) counts as empty. */
@@ -25,6 +31,7 @@ export const DEFAULT_CELL_SETTINGS: CellSettings = {
   inkRatio: 0.6,
   weakRatio: 0.8,
   guideRatio: 0.7,
+  guideMargin: 0.1,
   speckArea: 12,
   minInkArea: 40,
   thickness: 0,
@@ -162,6 +169,7 @@ export function analyzeCell(gray: GrayImage, index: number, settings: CellSettin
     weakCut,
     bandCut: paper * Math.max(settings.inkRatio, settings.guideRatio),
     bandRows: expected.map((v, y) => v || found[y]),
+    rowLimit: guideLineLimits(flat, strongCut, weakCut, paper * settings.guideMargin),
   })
   if (keep) applyCrop(binary.data, w, h, keep)
   const { image: cleaned } = removeSpecks(binary, settings.speckArea)

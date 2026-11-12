@@ -13,6 +13,12 @@ export interface HysteresisOptions {
   bandCut?: number
   /** Rows (true = guide band) where `bandCut` applies instead of `weakCut`. */
   bandRows?: boolean[]
+  /**
+   * Per-row ceiling for both cutoffs (Infinity = none). Set just below the darkness of a
+   * printed line that came out dark (grayscale prints), so neither the line itself nor
+   * growth along it counts as ink.
+   */
+  rowLimit?: number[]
 }
 
 /**
@@ -23,16 +29,26 @@ export interface HysteresisOptions {
 export function hysteresis(img: GrayImage, o: HysteresisOptions): BinaryImage {
   const { width: w, height: h, data } = img
   const weak = new Uint8Array(w * h)
+  const strongAt = new Float32Array(h)
   for (let y = 0; y < h; y++) {
-    const cut = o.bandRows?.[y] && o.bandCut !== undefined ? Math.min(o.bandCut, o.weakCut) : o.weakCut
+    const limit = o.rowLimit?.[y] ?? Infinity
+    const strong = Math.min(o.strongCut, limit)
+    const band = o.bandRows?.[y] && o.bandCut !== undefined ? Math.min(o.bandCut, o.weakCut) : o.weakCut
+    const cut = Math.min(Math.max(band, strong), limit)
+    strongAt[y] = strong
     for (let x = 0; x < w; x++) {
       const i = y * w + x
-      weak[i] = data[i] < cut || data[i] < o.strongCut ? 1 : 0
+      weak[i] = data[i] < cut ? 1 : 0
     }
   }
   const { labels, components } = labelComponents({ width: w, height: h, data: weak })
   const keep = new Uint8Array(components.length + 1)
-  for (let i = 0; i < data.length; i++) if (data[i] < o.strongCut && labels[i]) keep[labels[i]] = 1
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      if (data[i] < strongAt[y] && labels[i]) keep[labels[i]] = 1
+    }
+  }
   const out = new Uint8Array(w * h)
   for (let i = 0; i < out.length; i++) out[i] = keep[labels[i]]
   return { width: w, height: h, data: out }
@@ -116,6 +132,36 @@ export function detectGuideRows(img: GrayImage, strongCut: number, weakCut: numb
     if (faint >= minFraction * w) for (let k = y - pad; k <= y + pad; k++) if (k >= 0 && k < h) rows[k] = true
   }
   return rows
+}
+
+/**
+ * Per-row ink-cutoff ceilings for printed guide lines that came out dark, as on a
+ * grayscale print (where light blue becomes gray, sometimes almost as dark as ink).
+ * For each row that looks like a printed line (see `detectGuideRows`), the line's
+ * darkness is the median of its line-like pixels: darker than `weakCut` but not
+ * dark-ink dark (below 0.75 × `strongCut`). That row and `pad` rows on each side
+ * get a ceiling `margin` below it. Other rows get Infinity (no ceiling).
+ * Pen strokes crossing the line are much darker than the line and survive.
+ */
+export function guideLineLimits(img: GrayImage, strongCut: number, weakCut: number, margin: number, minFraction = 0.35, pad = 2): number[] {
+  const { width: w, height: h, data } = img
+  const limits = new Array<number>(h).fill(Infinity)
+  const floor = strongCut * 0.75
+  const vals: number[] = []
+  for (let y = 0; y < h; y++) {
+    let faint = 0
+    vals.length = 0
+    for (let x = 0; x < w; x++) {
+      const v = data[y * w + x]
+      if (v < weakCut && v >= strongCut) faint++
+      if (v < weakCut && v >= floor) vals.push(v)
+    }
+    if (faint < minFraction * w) continue
+    vals.sort((a, b) => a - b)
+    const limit = vals[vals.length >> 1] - margin
+    for (let k = Math.max(0, y - pad); k <= Math.min(h - 1, y + pad); k++) limits[k] = Math.min(limits[k], limit)
+  }
+  return limits
 }
 
 /**

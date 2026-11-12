@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Dev: inspect cells</title>
+    <style>
+      body { font: 13px system-ui; margin: 8px; }
+      .grid { display: flex; flex-wrap: wrap; gap: 6px; }
+      figure { margin: 0; border: 1px solid #ccc; padding: 2px; }
+      figcaption { text-align: center; }
+      canvas { width: 110px; image-rendering: pixelated; display: inline-block; }
+    </style>
+  </head>
+  <body>
+    <p id="status">Loading…</p>
+    <div class="grid" id="grid"></div>
+    <script type="module" src="./inspect.ts"></script>
+  </body>
+</html>

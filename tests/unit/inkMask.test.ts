@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_ADJUST, toCellSettings } from '../../src/core/scan/adjust'
+import { analyzeCell, DEFAULT_CELL_SETTINGS } from '../../src/core/scan/cells'
 import { grayImage, type BinaryImage, type GrayImage } from '../../src/core/scan/image'
 import { adjustThickness, hysteresis } from '../../src/core/scan/inkMask'
 import { DEFAULT_MARKER_SETTINGS } from '../../src/core/scan/fiducials'
@@ -80,5 +81,35 @@ describe('faint strokes through the full pipeline', () => {
     const settings = toCellSettings({ ...DEFAULT_ADJUST, sensitivity: 100 })
     const r = processPage(photo, { markers: DEFAULT_MARKER_SETTINGS, cells: settings })
     expect(r.cells.slice(1).filter((c) => !c.empty).map((c) => c.index)).toEqual([])
+  })
+})
+
+describe('dark guide lines from a grayscale print', () => {
+  // A cell-sized crop: paper 235, a gray halftone-ish baseline (~0.62 × paper, as dark as on the
+  // user's grayscale scan) a few pixels off its expected row, and two dark "n" legs standing on it.
+  const W = 281
+  const H = 232
+  const LINE = 168
+  const cell = () => {
+    const img = grayImage(W, H, 235)
+    for (let y = LINE; y < LINE + 4; y++) for (let x = 0; x < W; x++) img.data[y * W + x] = (x + y) % 2 ? 136 : 156
+    paint(img, 100, 80, 108, LINE + 2, 50)
+    paint(img, 160, 80, 168, LINE + 2, 50)
+    return img
+  }
+  const at = (m: Uint8Array, x: number, y: number) => m[y * W + x]
+
+  it('keeps the legs and drops the line', () => {
+    const r = analyzeCell(cell(), 0, DEFAULT_CELL_SETTINGS)
+    expect(at(r.ink, 104, 120)).toBe(1)
+    expect(at(r.ink, 164, 120)).toBe(1)
+    for (const x of [20, 60, 134, 220, 260]) expect(at(r.ink, x, LINE + 1)).toBe(0)
+    // Nothing but the two legs: about 2 × 8 px wide.
+    expect(r.inkBox!.maxX - r.inkBox!.minX).toBeLessThan(80)
+  })
+
+  it('without the line ceiling, the line would be traced (the old behavior)', () => {
+    const r = analyzeCell(cell(), 0, { ...DEFAULT_CELL_SETTINGS, guideMargin: -1000 })
+    expect(r.inkBox!.maxX - r.inkBox!.minX).toBeGreaterThan(200)
   })
 })
