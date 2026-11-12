@@ -58,11 +58,19 @@ test('ligature sheets become ligatures and contextual alternates in the font', a
   await page.getByLabel('Preview text').fill('Th')
   const preview = page.getByTestId('font-preview')
   await expect(page.getByTestId('ligature-mode')).toBeVisible({ timeout: 20_000 })
-  await page.waitForTimeout(800)
-  const withLig = await preview.evaluate((el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width })
-  await page.getByTestId('ligature-mode').selectOption('off')
-  const without = await preview.evaluate((el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width })
-  expect(Math.abs(withLig - without)).toBeGreaterThan(2)
+  const width = () => preview.evaluate((el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width })
+  // Preview fonts rebuild in the background (e.g. when generated Bold ligatures arrive), so retry until they settle.
+  await expect
+    .poll(
+      async () => {
+        await page.getByTestId('ligature-mode').selectOption('on')
+        const withLig = await width()
+        await page.getByTestId('ligature-mode').selectOption('off')
+        return Math.abs(withLig - (await width()))
+      },
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThan(2)
 
   // Download and inspect the fonts.
   const downloads: Download[] = []
