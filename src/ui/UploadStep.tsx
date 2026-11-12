@@ -3,6 +3,7 @@ import type { ScanStage } from '../core/scan/processPage'
 import { TEMPLATE_PAGES } from '../core/template/charset'
 import { ligatureSheetName } from '../core/template/ligatures'
 import { slotLabel, STYLES, type Slot } from '../core/template/styles'
+import { isPdf, pdfToImages } from './pdfPages'
 import type { Upload } from './useProject'
 
 const STAGE_TEXT: Record<ScanStage, string> = {
@@ -44,10 +45,30 @@ export function UploadStep({ uploads, onFiles, onPickSlot, onRemove, restored, o
   const input = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [sampleError, setSampleError] = useState<string | null>(null)
+  /** PDFs being split into page images, and PDFs that couldn't be opened. */
+  const [opening, setOpening] = useState<string[]>([])
+  const [pdfErrors, setPdfErrors] = useState<string[]>([])
 
   const accept = (list: FileList | null) => {
-    const files = Array.from(list ?? []).filter((f) => /^image\/(png|jpeg)$/.test(f.type) || /\.(png|jpe?g)$/i.test(f.name))
-    if (files.length) onFiles(files)
+    const all = Array.from(list ?? [])
+    const images = all.filter((f) => /^image\/(png|jpeg)$/.test(f.type) || /\.(png|jpe?g)$/i.test(f.name))
+    if (images.length) onFiles(images)
+    for (const pdf of all.filter(isPdf)) {
+      setOpening((o) => [...o, pdf.name])
+      setPdfErrors((e) => e.filter((m) => !m.startsWith(`${pdf.name}:`)))
+      pdfToImages(pdf)
+        .then((pages) => (pages.length ? onFiles(pages) : setPdfErrors((e) => [...e, `${pdf.name}: the PDF has no pages.`])))
+        .catch((err: unknown) => {
+          console.warn(`Couldn't open ${pdf.name}:`, err)
+          const name = err instanceof Error ? err.name : ''
+          const why =
+            name === 'PasswordException'
+              ? 'the PDF is password-protected. Save a copy without a password and try again.'
+              : "couldn't open this PDF. Try saving it again from your scanner app, or upload JPG/PNG images instead."
+          setPdfErrors((e) => [...e, `${pdf.name}: ${why}`])
+        })
+        .finally(() => setOpening((o) => o.filter((n) => n !== pdf.name)))
+    }
   }
 
   return (
@@ -66,7 +87,7 @@ export function UploadStep({ uploads, onFiles, onPickSlot, onRemove, restored, o
           accept(e.dataTransfer.files)
         }}
       >
-        <p>Drag and drop your scans or photos here (JPG or PNG), one image per page.</p>
+        <p>Drag and drop your scans or photos here: JPG or PNG images (one per page) or PDF scans.</p>
         <div className="row centered">
           <button onClick={() => input.current?.click()}>Choose files…</button>
           {import.meta.env.DEV && (
@@ -87,7 +108,7 @@ export function UploadStep({ uploads, onFiles, onPickSlot, onRemove, restored, o
         <input
           ref={input}
           type="file"
-          accept="image/png,image/jpeg"
+          accept="image/png,image/jpeg,application/pdf,.pdf"
           multiple
           hidden
           data-testid="upload-input"
@@ -97,6 +118,16 @@ export function UploadStep({ uploads, onFiles, onPickSlot, onRemove, restored, o
           }}
         />
         {sampleError && <p className="bad">{sampleError}</p>}
+        {opening.map((n) => (
+          <p key={n} data-testid="pdf-opening">
+            Opening {n}…
+          </p>
+        ))}
+        {pdfErrors.map((m) => (
+          <p key={m} className="bad" role="alert">
+            {m}
+          </p>
+        ))}
       </div>
       <p className="note autosave-note" data-testid="autosave-note">
         {restored
