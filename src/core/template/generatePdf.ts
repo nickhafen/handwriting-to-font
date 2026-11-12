@@ -225,3 +225,19 @@ export async function generateTemplatePdf(size: PageSizeId, options: TemplateOpt
   if (doc.getPageCount() === 0) throw new Error('No characters to print')
   return doc.save()
 }
+
+/** Split a PDF into one single-page PDF per page, keeping the document info. */
+export async function splitPdfPages(pdf: Uint8Array): Promise<Uint8Array[]> {
+  const src = await PDFDocument.load(pdf)
+  const out: Uint8Array[] = []
+  for (let i = 0; i < src.getPageCount(); i++) {
+    const doc = await PDFDocument.create()
+    doc.setTitle(src.getTitle() ?? 'Handwriting to Font — template')
+    doc.setCreator('Handwriting to Font')
+    doc.setProducer('Handwriting to Font')
+    const [page] = await doc.copyPages(src, [i])
+    doc.addPage(page)
+    out.push(await doc.save())
+  }
+  return out
+}

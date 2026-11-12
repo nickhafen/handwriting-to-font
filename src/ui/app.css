@@ -759,31 +759,71 @@ button.small {
   margin: 0.25rem 0;
 }
 
-/* ---- step 1 layout (2026-11-07) ---- */
+/* ---- step 1 layout (2026-11-12) ---- */
 
-.paper-choice {
+.template-settings {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.25rem 0 0.75rem;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  margin: 0.5rem 0 0.75rem;
 }
 
-.paper-choice .choice {
+.template-settings fieldset {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.template-settings legend,
+.setting-label {
+  float: left;
+  font-weight: normal;
+  font-size: 0.9rem;
+  color: #444;
+  margin: 0 0.5rem 0 0;
+}
+
+.style-choice {
+  display: flex;
+  align-items: center;
+}
+
+.segmented {
+  display: inline-flex;
   border: 1px solid #c5ccd6;
   border-radius: 6px;
-  padding: 0.25rem 0.6rem;
+  overflow: hidden;
+}
+
+.segmented .choice {
+  padding: 0.25rem 0.7rem;
   cursor: pointer;
 }
 
-.paper-choice .choice.selected {
-  border-color: #1a4f8b;
-  background: #eef3fa;
+.segmented .choice + .choice {
+  border-left: 1px solid #c5ccd6;
 }
 
-.template-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 0.75rem;
+.segmented .choice.selected {
+  background: #eef3fa;
+  color: #1a4f8b;
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segmented .choice:focus-within {
+  outline: 3px solid #f2a900;
+  outline-offset: -3px;
+}
+
+.style-note {
+  margin: -0.25rem 0 0.75rem;
 }
 
 .card {
@@ -809,16 +849,124 @@ button.small {
   margin: 0;
 }
 
-.card .row {
-  gap: 0.4rem;
-}
-
-.card details summary {
+.card details summary,
+.more-sheets details summary {
   cursor: pointer;
 }
 
-.tips-head {
+.basic-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.basic-actions {
+  gap: 0.4rem;
+}
+
+.basic-card .tips {
+  margin: 0.3rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid #d8dee6;
+  font-size: 0.9rem;
+  color: #444;
+}
+
+.download-options {
+  position: relative;
+}
+
+button.gear {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.5rem;
+  align-self: stretch;
+}
+
+.download-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 5;
+  width: 15rem;
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  background: #fff;
+  border: 1px solid #c5ccd6;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+.download-menu legend {
+  float: left;
+  width: 100%;
+  font-weight: normal;
+  font-size: 0.85rem;
+  color: #444;
+  margin-bottom: 0.25rem;
+}
+
+.download-menu label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.2rem 0;
+  cursor: pointer;
+  clear: both;
+}
+
+.download-menu input {
+  margin-top: 0.3rem;
+}
+
+.download-menu .note {
+  display: block;
+  font-size: 0.8rem;
+}
+
+.download-menu .menu-foot {
+  margin: 0.4rem 0 0;
+  padding-top: 0.4rem;
+  border-top: 1px solid #e3e7ec;
+}
+
+.more-sheets {
   margin-top: 1rem;
+}
+
+.more-sheets > summary {
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.sheet-row {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+  gap: 0.4rem 1rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid #e3e7ec;
+}
+
+.sheet-row h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.sheet-row .note,
+.sheet-row .redo-marked {
+  margin: 0 0 0.3rem;
+}
+
+.sheet-row .row {
+  gap: 0.4rem;
+}
+
+@media (max-width: 600px) {
+  .sheet-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* Drag-to-crop on the drawer's scan image. */
