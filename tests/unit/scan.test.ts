@@ -110,7 +110,7 @@ describe('processPage on synthetic photos', () => {
 
   it.each(cases)('$name', ({ opts }) => {
     const result = processPage(photograph(page, opts))
-    expect(result.pageId).toEqual({ version: 1, pageIndex: 1 })
+    expect(result.pageId).toEqual({ version: 1, pageIndex: 1, ext: 0 })
     expect(result.idConfidence).toBeGreaterThan(0.5)
     const [x, g, l, clipped] = result.cells
     const tol = 30 // font units (~3 px at 150 DPI)

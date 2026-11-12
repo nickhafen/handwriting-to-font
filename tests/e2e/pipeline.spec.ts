@@ -71,7 +71,7 @@ test.describe('scan pipeline on synthetic fixtures', () => {
       const r = await makeAndScan(page, name, spec)
       const skipped = spec.skip?.length ?? 0
 
-      expect(r.pageId).toEqual({ version: 1, pageIndex: spec.pageIndex })
+      expect(r.pageId).toEqual({ version: 1, pageIndex: spec.pageIndex, ext: 0 })
       expect(r.idConfidence).toBeGreaterThan(0.25)
 
       const filled = r.cells.filter((c) => !c.empty)

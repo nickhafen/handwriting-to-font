@@ -1,11 +1,21 @@
 // Page-ID strip encoding: bits 0-3 = template version, bits 4-7 = page index.
-// Bit i is the i-th square from the left; filled = 1.
-import { ID_BITS } from './layout'
+// Bit i is the i-th square from the left; filled = 1. Ligature sheets also have
+// extension squares holding the style they're written in (see ID_EXT_SQUARES).
+import { ID_BITS, ID_EXT_BITS } from './layout'
 
 export interface PageId {
   version: number
   pageIndex: number
+  /** Extension value (ligature sheets: the style index; 0 = Regular, also on pages printed without the squares). */
+  ext?: number
 }
+
+export function encodeIdExt(ext: number): boolean[] {
+  if (ext < 0 || ext >= 1 << ID_EXT_BITS) throw new RangeError(`extension ${ext} must be 0-${(1 << ID_EXT_BITS) - 1}`)
+  return Array.from({ length: ID_EXT_BITS }, (_, i) => ((ext >> i) & 1) === 1)
+}
+
+export const decodeIdExt = (bits: boolean[]): number => bits.reduce((acc, bit, i) => acc | ((bit ? 1 : 0) << i), 0)
 
 export function encodePageId({ version, pageIndex }: PageId): boolean[] {
   if (version < 1 || version > 15) throw new RangeError(`template version ${version} must be 1-15`)

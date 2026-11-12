@@ -34,9 +34,10 @@ interface Props {
   onFeature: (key: string, f: LigatureFeature) => void
   metricsOf: (g: LigatureGlyph) => GlyphMetrics | undefined
   isAdjusted: (g: LigatureGlyph) => boolean
+  isRedo: (g: LigatureGlyph) => boolean
 }
 
-export function LigatureGrid({ ligatures, selected, onSelect, onText, onFeature, metricsOf, isAdjusted }: Props) {
+export function LigatureGrid({ ligatures, selected, onSelect, onText, onFeature, metricsOf, isAdjusted, isRedo }: Props) {
   const sheets = [...new Set(ligatures.map((g) => g.sheet))]
   return (
     <>
@@ -67,6 +68,7 @@ export function LigatureGrid({ ligatures, selected, onSelect, onText, onFeature,
                       <span className="glyph-char">
                         Box {g.box + 1}
                         {isAdjusted(g) && <span className="badge info">adjusted</span>}
+                        {isRedo(g) && <span className="badge redo">redo</span>}
                         {g.clipped && <span className="badge warn">clipped</span>}
                         {extentProblem(g, m) && <span className="badge warn">{extentLabel(extentProblem(g, m)!)}</span>}
                       </span>

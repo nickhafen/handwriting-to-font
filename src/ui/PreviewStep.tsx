@@ -46,6 +46,8 @@ interface Props {
   onGenerate: (g: GenerateSettings) => void
   metrics: Record<string, GlyphMetrics>
   ligatures: LigatureGlyph[]
+  /** Regular ligatures re-traced thicker, for a generated Bold. */
+  boldLigatures: LigatureGlyph[] | null
   settings: FontSettings
   onSettings: (s: FontSettings) => void
   text: string
@@ -57,7 +59,7 @@ interface Props {
 export function PreviewStep(props: Props) {
   const { glyphs, uploadedStyles, generate, onGenerate, metrics, settings, text, size, ligatures } = props
   const [ligatureMode, setLigatureMode] = useState<'on' | 'off' | 'all'>('on')
-  const ligsFor = (s: StyleId) => ligaturesForStyle(s, ligatures, uploadedStyles, generate)
+  const ligsFor = (s: StyleId) => ligaturesForStyle(s, ligatures, uploadedStyles, generate, props.boldLigatures)
   const readyLigatures = ligatures.filter(ligatureReady).length
   const featureSettings = ligatureMode === 'off' ? '"liga" 0, "calt" 0, "dlig" 0' : ligatureMode === 'all' ? '"dlig" 1' : 'normal'
   const setText = props.onText
@@ -108,7 +110,7 @@ export function PreviewStep(props: Props) {
       clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [glyphs, metrics, ligatures, availableKey, settings.letterSpacing, settings.wordSpacing, generate.slant])
+  }, [glyphs, metrics, ligatures, props.boldLigatures, availableKey, settings.letterSpacing, settings.wordSpacing, generate.slant])
 
   useEffect(() => () => faces.current.forEach(unloadPreviewFont), [])
 

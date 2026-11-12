@@ -7,7 +7,7 @@ import type { Contour, Point } from './geometry'
 import { suspiciousCells, type CellResult } from './scan/cells'
 import type { PageScan } from './scan/processPage'
 import { CHARSET, TEMPLATE_PAGES, type CharInfo } from './template/charset'
-import { glyphNameOf, ligatureBoxes, ligatureGlyphName, parseLigatureText, type ParsedLigature } from './template/ligatures'
+import { glyphNameOf, ligatureBoxes, ligatureGlyphName, ligatureSheetStyle, parseLigatureText, type ParsedLigature } from './template/ligatures'
 import { STYLE_IDS, styleInfo, type StyleId } from './template/styles'
 
 /** Merged scans of one style, keyed by template page (0 = letters, 1 = numbers and punctuation). */
@@ -292,7 +292,10 @@ export function ligatureText(settings: LigatureSettings, sheet: number, box: num
   return typed ?? ligatureBoxes(sheet)[box]?.preset ?? ''
 }
 
-/** One entry per box of each uploaded ligature sheet, in sheet and box order. */
+/**
+ * One entry per box of each uploaded ligature sheet, in sheet and box order.
+ * Each box belongs to the style its sheet is written in.
+ */
 export function assembleLigatures(sheets: ReadonlyMap<number, PageScan>, settings: LigatureSettings): LigatureGlyph[] {
   const out: LigatureGlyph[] = []
   for (const sheet of [...sheets.keys()].sort((a, b) => a - b)) {
@@ -306,7 +309,7 @@ export function assembleLigatures(sheets: ReadonlyMap<number, PageScan>, setting
       out.push({
         info: { char: key, unicode: 0, glyphName: `lig_${sheet}_${box.index}` },
         label: text || `Box ${box.index + 1}`,
-        style: 'regular',
+        style: ligatureSheetStyle(sheet),
         pageIndex: sheet,
         cell,
         outline: cell.empty ? [] : cell.contours,
@@ -324,18 +327,23 @@ export function assembleLigatures(sheets: ReadonlyMap<number, PageScan>, setting
       })
     }
   }
-  // Same text in several boxes: the newest (last) one is used.
+  // Same text in several boxes of one style: the newest (last) one is used.
   const seen = new Set<string>()
   for (let i = out.length - 1; i >= 0; i--) {
     const g = out[i]
     if (g.empty || (g.parsed.kind !== 'ligature' && g.parsed.kind !== 'alternate')) continue
-    const sig = g.text.trim()
+    const sig = `${g.style}|${g.text.trim()}`
     if (seen.has(sig)) g.duplicate = true
     seen.add(sig)
   }
-  // Glyph names: t_h for ligatures; e.alt1, e.alt2, ... for alternates.
+  for (const style of STYLE_IDS) nameLigatures(out.filter((g) => g.style === style))
+  return out
+}
+
+/** Glyph names (in place, for one font's set): t_h for ligatures; e.alt1, e.alt2, ... for alternates. */
+function nameLigatures(list: LigatureGlyph[]): void {
   const altCount = new Map<string, number>()
-  for (const g of out) {
+  for (const g of list) {
     if (g.duplicate || g.empty) continue
     if (g.parsed.kind === 'ligature') g.info = { ...g.info, glyphName: ligatureGlyphName(g.parsed.chars) }
     if (g.parsed.kind === 'alternate') {
@@ -345,7 +353,6 @@ export function assembleLigatures(sheets: ReadonlyMap<number, PageScan>, setting
       g.info = { ...g.info, glyphName: `${base}.alt${n}` }
     }
   }
-  return out
 }
 
 /** Has ink, a valid text, and isn't shadowed by a duplicate. */
@@ -367,20 +374,42 @@ export function substitutionsFor(ready: LigatureGlyph[]): Substitutions {
 }
 
 /**
- * Ligatures for each style's font. Ligature sheets are written in Regular; a
- * fully generated Italic gets them slanted. Bold styles don't get them yet.
+ * Ligatures for one style's font. Each style uses the ligature sheets written in
+ * that style. When a style's letters are generated (not written), it also gets
+ * the ligatures generated the same way: Bold from Regular boxes re-traced with
+ * thicker strokes (`boldFromRegular`), Italic by slanting Regular, Bold Italic
+ * by slanting Bold. A written box wins over a generated one with the same text.
  */
 export function ligaturesForStyle(
   style: StyleId,
   ligatures: LigatureGlyph[],
   writtenStyles: ReadonlySet<StyleId>,
   gen: GenerateSettings,
+  boldFromRegular: LigatureGlyph[] | null = null,
 ): LigatureGlyph[] {
-  if (style === 'regular') return ligatures
-  if (style === 'italic' && gen.italic && !writtenStyles.has('italic')) {
-    return ligatures.map((g) => ({ ...g, outline: slantContours(g.outline, gen.slant), generated: 'slanted' as const }))
+  const own = ligatures.filter((g) => g.style === style && ligatureReady(g))
+  const slant = (list: LigatureGlyph[], to: StyleId): LigatureGlyph[] =>
+    list.map((g) => ({
+      ...g,
+      style: to,
+      outline: slantContours(g.outline, gen.slant),
+      generated: g.generated ? ('thickened and slanted' as const) : ('slanted' as const),
+    }))
+  let derived: LigatureGlyph[] = []
+  if (!writtenStyles.has(style)) {
+    if (style === 'bold' && gen.bold && boldFromRegular) {
+      derived = boldFromRegular.filter((g) => g.style === 'regular').map((g) => ({ ...g, style: 'bold' as const, generated: 'thickened' as const }))
+    } else if (style === 'italic' && gen.italic) {
+      derived = slant(ligatures.filter((g) => g.style === 'regular'), 'italic')
+    } else if (style === 'boldItalic' && gen.italic) {
+      derived = slant(ligaturesForStyle('bold', ligatures, writtenStyles, gen, boldFromRegular), 'boldItalic')
+    }
   }
-  return []
+  const texts = new Set(own.map((g) => g.text.trim()))
+  const combined = [...own, ...derived.filter((g) => ligatureReady(g) && !texts.has(g.text.trim()))].map((g) => ({ ...g }))
+  // Written and generated boxes can't share an alternate's name (e.alt1) within one font.
+  if (derived.length) nameLigatures(combined)
+  return combined
 }
 
 export { STYLE_IDS }

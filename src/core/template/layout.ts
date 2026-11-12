@@ -92,6 +92,21 @@ export const ID_SQUARES: Rect[] = Array.from({ length: ID_BITS }, (_, i) => ({
   h: ID_SQUARE,
 }))
 
+/**
+ * Extension squares to the right of the strip (ligature sheets only): the style
+ * a ligature sheet is written in (0 = Regular). Added after v1 templates were
+ * printed; old prints have blank paper here, which reads as 0 (Regular), so they
+ * keep working without a template version bump.
+ */
+export const ID_EXT_BITS = 2
+const ID_EXT_GAP = 0.25 * IN
+export const ID_EXT_SQUARES: Rect[] = Array.from({ length: ID_EXT_BITS }, (_, i) => ({
+  x: (BOX.width + ID_STRIP_WIDTH) / 2 + ID_EXT_GAP + i * (ID_SQUARE + ID_GAP),
+  y: (MARKER_SIZE - ID_SQUARE) / 2,
+  w: ID_SQUARE,
+  h: ID_SQUARE,
+}))
+
 // -------------------------------------------------------------- header --------
 
 /** Text baselines (y, canonical frame) for the two header lines below the marker row. */

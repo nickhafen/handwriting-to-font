@@ -240,6 +240,7 @@ export function ReviewStep(p: Props) {
           onFeature={p.onLigatureFeature}
           metricsOf={metricsOf}
           isAdjusted={isAdjusted}
+          isRedo={isRedo}
         />
       )}
 
@@ -301,7 +302,7 @@ export function ReviewStep(p: Props) {
                 ))}
               </span>
               <span className="spacer" />
-              {!isLigature(sel) && (
+              {!sel.generated && (
                 <label className="redo-toggle">
                   <input type="checkbox" checked={isRedo(sel)} onChange={() => p.onToggleRedo(sel.style, sel.info.char)} /> Mark for a
                   redo sheet

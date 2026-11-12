@@ -8,6 +8,7 @@ import {
   GUIDE_RGB,
   HEADER,
   HEADER_GRAY,
+  ID_EXT_SQUARES,
   ID_SQUARES,
   INSET,
   LABEL_GRAY,
@@ -21,8 +22,8 @@ import {
   type PageSizeId,
   type Rect,
 } from './layout'
-import { encodePageId } from './pageIdCodec'
-import { COMMON_SHEET, ligatureBoxes, ligatureBoxGeometry, ligatureSheetName, pageIndexOfLigatureSheet, type LigatureBox } from './ligatures'
+import { encodeIdExt, encodePageId, type PageId } from './pageIdCodec'
+import { COMMON_SHEET, ligatureBoxes, ligatureBoxGeometry, ligaturePageId, ligatureSheetName, ligatureSheetStyle, sheetNumber, type LigatureBox } from './ligatures'
 import { pageIndexOf, styleInfo, type StyleId } from './styles'
 
 const BLACK = rgb(0, 0, 0)
@@ -133,8 +134,10 @@ export interface TemplateSheet {
   style?: StyleId
   /** Only draw boxes for these characters (a redo sheet). Pages with none are skipped. */
   only?: string[]
-  /** Print ligature sheet n instead: 0 = common ligatures, 1–7 = blank sheets. */
+  /** Print a ligature sheet instead, by sheet id (style × 8 + n; n = 0 common, 1–7 blank). */
   ligatureSheet?: number
+  /** Ligature redo sheet: only draw these boxes (0-based). */
+  boxes?: number[]
 }
 
 export interface TemplateOptions {
@@ -158,17 +161,24 @@ export async function generateTemplatePdf(size: PageSizeId, options: TemplateOpt
   }
 
   /** A new page with corner markers, the page-ID strip and a two-line header. */
-  function newPage(pageIndex: number, title: string, note: string): Canvas {
+  function newPage(id: PageId, title: string, note: string): Canvas {
     const page = doc.addPage([paper.width, paper.height])
     const c = new Canvas(page, origin.x, origin.y, paper.height)
     // Corner markers; the top-left one has a white hole so the scanner can tell which way is up.
     for (const r of Object.values(MARKERS)) c.fill(r)
     c.fill({ ...MARKER_HOLE_RECT, x: MARKERS.tl.x + MARKER_HOLE_RECT.x, y: MARKERS.tl.y + MARKER_HOLE_RECT.y }, WHITE)
     // Page-ID strip: filled squares are 1s; empty ones get a light outline.
-    encodePageId({ version: TEMPLATE_VERSION, pageIndex }).forEach((bit, i) => {
+    encodePageId(id).forEach((bit, i) => {
       if (bit) c.fill(ID_SQUARES[i])
       else c.stroke(ID_SQUARES[i], GUIDE, 0.5)
     })
+    // Extension squares (ligature sheets only).
+    if (id.ext !== undefined) {
+      encodeIdExt(id.ext).forEach((bit, i) => {
+        if (bit) c.fill(ID_EXT_SQUARES[i])
+        else c.stroke(ID_EXT_SQUARES[i], GUIDE, 0.5)
+      })
+    }
     const fit = (s: string, f: PDFFont, size: number) => Math.min(size, (size * BOX.width) / f.widthOfTextAtSize(s, size))
     c.text(title, HEADER.x, HEADER.titleBaseline, bold, fit(title, bold, HEADER.titleSize), HEADER_GRAY)
     c.text(note, HEADER.x, HEADER.noteBaseline, font, fit(note, font, HEADER.noteSize), HEADER_GRAY)
@@ -177,14 +187,21 @@ export async function generateTemplatePdf(size: PageSizeId, options: TemplateOpt
 
   for (const sheet of sheets) {
     if (sheet.ligatureSheet !== undefined) {
-      const n = sheet.ligatureSheet
-      const title = `Handwriting to Font  ·  ${ligatureSheetName(n)}  ·  Template v${TEMPLATE_VERSION}`
-      const note =
-        n === COMMON_SHEET
-          ? 'Write each sequence the way your letters naturally join. Leave any you don’t want blank.'
-          : 'Write any letter sequence, or one letter’s alternate form. After uploading, type what each box holds.'
-      const c = newPage(pageIndexOfLigatureSheet(n), title, note)
-      for (const box of ligatureBoxes(n)) drawLigatureBox(c, box, font)
+      const id = sheet.ligatureSheet
+      const only = sheet.boxes ? new Set(sheet.boxes) : null
+      const boxes = ligatureBoxes(id).filter((b) => !only || only.has(b.index))
+      if (!boxes.length) continue
+      const kind = only ? '  ·  Redo sheet' : ''
+      const title = `Handwriting to Font  ·  ${ligatureSheetName(id)}${kind}  ·  Template v${TEMPLATE_VERSION}`
+      const style = ligatureSheetStyle(id)
+      const inStyle = style === 'regular' ? '' : ` in your ${styleInfo(style).label.toLowerCase()} style`
+      const note = only
+        ? 'Print at 100%. Write only in the boxes shown; your new versions replace the earlier ones.'
+        : sheetNumber(id) === COMMON_SHEET
+          ? `Write each sequence${inStyle} the way your letters naturally join. Leave any you don’t want blank.`
+          : `Write any letter sequence${inStyle}, or one letter’s alternate form. After uploading, type what each box holds.`
+      const c = newPage(ligaturePageId(id, TEMPLATE_VERSION), title, note)
+      for (const box of boxes) drawLigatureBox(c, box, font)
       continue
     }
     const styleId = sheet.style ?? 'regular'
@@ -201,7 +218,7 @@ export async function generateTemplatePdf(size: PageSizeId, options: TemplateOpt
         : styleId === 'regular'
           ? 'Print at 100% / Actual size. Use a black felt-tip pen. Sit each character on the solid baseline.'
           : `Print at 100% / Actual size. Write every character in your ${style.label.toLowerCase()} style.`
-      const c = newPage(pageIndexOf({ style: styleId, page: tp.index }), title, note)
+      const c = newPage({ version: TEMPLATE_VERSION, pageIndex: pageIndexOf({ style: styleId, page: tp.index }) }, title, note)
       cells.forEach((info, i) => info && drawCell(c, i, info, font))
     }
   }

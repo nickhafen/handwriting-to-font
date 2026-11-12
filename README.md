@@ -9,12 +9,12 @@ There is no server, no account, and no AI model.
 
 ## How to use it
 
-1. **Print the template** (US Letter or A4) at 100% / Actual size, **in color**. The guide
-   lines are light blue so the scanner can ignore them. (Grayscale printing isn't
-   supported yet: the gray guide lines can be mistaken for ink.)
+1. **Print the template** (US Letter or A4) at 100% / Actual size, in color if you can. The guide
+   lines are light blue so the scanner can ignore them. Black-and-white printing works too
+   (the gray guide lines are filtered out), but color reads most reliably.
 2. **Write** each character in its box with a black felt-tip pen, sitting on the solid baseline.
-3. **Scan** at 300 DPI, or photograph each page flat in even light with all four black
-   corner squares in view.
+3. **Scan** at 300 DPI (images or a PDF), or photograph each page flat in even light with
+   all four black corner squares in view.
 4. **Upload** the images, **review** the letters (adjust ink, position and spacing per letter), then **preview and download** your font. Optional Bold and Italic styles can be written on their own template sets or generated.
    Your project is saved automatically in your browser, so you can come back later and redo a few characters with a redo sheet.
    Optional ligature sheets add joined letter pairs (th, oo, ing…) and alternate letter forms used in context, e.g. an "e" after "r".

@@ -67,6 +67,10 @@ test('ligature sheets become ligatures and contextual alternates in the font', a
   // Download and inspect the fonts.
   const downloads: Download[] = []
   page.on('download', (d) => downloads.push(d))
+  // Generated Bold ligatures come from a background re-trace; let it finish.
+  await expect(page.getByTestId('retrace-status')).not.toContainText('Updating', { timeout: 30_000 })
+  await page.waitForTimeout(700)
+  await expect(page.getByTestId('retrace-status')).not.toContainText('Updating', { timeout: 30_000 })
   await page.getByRole('button', { name: 'Download 4 font files' }).click()
   await expect.poll(() => downloads.length, { timeout: 10_000 }).toBe(4)
   const fonts = await Promise.all(
@@ -75,12 +79,14 @@ test('ligature sheets become ligatures and contextual alternates in the font', a
       return ot.parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength))
     }),
   )
-  const [regular, bold, italic] = fonts
+  const [regular, bold, italic, boldItalic] = fonts
   const names = (f: typeof regular) => Array.from({ length: f.glyphs.length }, (_, i) => f.glyphs.get(i).name)
   expect(names(regular)).toEqual(expect.arrayContaining(['f_f_i', 'f_f', 't_h', 'i_n_g', 'T_h', 'e.alt1']))
   expect(regular.tables.gsub.features.map((x: { tag: string }) => x.tag)).toEqual(['calt', 'liga'])
   expect(names(italic)).toEqual(expect.arrayContaining(['T_h', 'e.alt1'])) // generated italic gets slanted ligatures
-  expect(bold.tables.gsub).toBeUndefined() // bold styles don't get ligatures yet
+  // Generated Bold gets thickened Regular ligatures; generated Bold Italic slants those.
+  expect(names(bold)).toEqual(expect.arrayContaining(['f_f_i', 't_h', 'T_h', 'e.alt1']))
+  expect(names(boldItalic)).toEqual(expect.arrayContaining(['f_f_i', 't_h', 'T_h', 'e.alt1']))
 
   // The contextual alternate rule: after r, e becomes e.alt1.
   const gsub = regular.tables.gsub

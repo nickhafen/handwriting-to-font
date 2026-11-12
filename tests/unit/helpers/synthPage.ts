@@ -2,6 +2,7 @@
 // black marks and light guides straight from layout.ts (no fonts needed),
 // adds rectangular "ink" at known font-unit heights, then distorts it like a photo.
 import {
+  ID_EXT_SQUARES,
   BOX,
   ID_SQUARES,
   MARKER_HOLE_RECT,
@@ -11,7 +12,7 @@ import {
   unitsToY,
   type Rect,
 } from '../../../src/core/template/layout'
-import { encodePageId } from '../../../src/core/template/pageIdCodec'
+import { encodeIdExt, encodePageId } from '../../../src/core/template/pageIdCodec'
 import { solveHomography, warp, type Point2 } from '../../../src/core/scan/homography'
 import { grayImage, type GrayImage } from '../../../src/core/scan/image'
 
@@ -31,7 +32,8 @@ export interface InkSpec {
 
 const GUIDE_GRAY = 237 // the brightest channel of #A4DDED
 
-export function renderPage(pageIndex: number, dpi: number, inks: InkSpec[], marginIn = 0.6): GrayImage {
+/** `ext` fills the page-ID extension squares (ligature sheets: the style index). */
+export function renderPage(pageIndex: number, dpi: number, inks: InkSpec[], marginIn = 0.6, ext = 0): GrayImage {
   const s = dpi / 72
   const m = marginIn * dpi
   const W = Math.round(BOX.width * s + 2 * m)
@@ -44,6 +46,7 @@ export function renderPage(pageIndex: number, dpi: number, inks: InkSpec[], marg
   for (const r of Object.values(MARKERS)) fill(r, 0)
   fill({ ...MARKER_HOLE_RECT }, 255)
   encodePageId({ version: TEMPLATE_VERSION, pageIndex }).forEach((bit, i) => bit && fill(ID_SQUARES[i], 0))
+  encodeIdExt(ext).forEach((bit, i) => bit && fill(ID_EXT_SQUARES[i], 0))
   for (let i = 0; i < 56; i++) {
     const g = cellGeometry(i)
     const line = (y: number) => fill({ x: g.cell.x, y, w: g.cell.w, h: 1 }, GUIDE_GRAY)

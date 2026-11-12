@@ -19,7 +19,7 @@ import {
   type LigatureSettings,
 } from '../core/project'
 import type { LigatureFeature } from '../core/font/gsub'
-import { BLANK_SHEETS, ligatureSheetOf } from '../core/template/ligatures'
+import { ALL_LIGATURE_SHEETS, ligatureBoxes, ligatureSheetOf, ligatureSheetStyle } from '../core/template/ligatures'
 import { DEFAULT_ADJUST, sameAdjust, type InkAdjust } from '../core/scan/adjust'
 import { sameCrop, type CellResult, type CropRect } from '../core/scan/cells'
 import type { PageScan } from '../core/scan/processPage'
@@ -50,7 +50,7 @@ export interface Upload {
   needsPagePick: boolean
   /** Characters this upload currently supplies (later uploads of the same page can replace some). */
   used: number
-  /** Set when this is a ligature sheet (0 = common, 1–7 = blank sheets). */
+  /** Set when this is a ligature sheet: its sheet id (style × 8 + n; n = 0 common, 1–7 blank). */
   ligatureSheet: number | null
 }
 
@@ -76,8 +76,10 @@ export interface ProjectState {
   generate: GenerateSettings
   /** Characters marked for a redo sheet, as overrideKey(style, char). */
   redo: Set<string>
-  /** Ligature and contextual-alternate boxes from uploaded ligature sheets. */
+  /** Ligature and contextual-alternate boxes from uploaded ligature sheets (all styles). */
   ligatures: LigatureGlyph[]
+  /** Regular ligature boxes re-traced with thicker strokes, for a generated Bold (null when off). */
+  boldLigatures: LigatureGlyph[] | null
   ligatureSheetsUploaded: Set<number>
   setLigatureText(key: string, text: string): void
   setLigatureFeature(key: string, feature: LigatureFeature): void
@@ -158,10 +160,10 @@ export function useProject(): ProjectState {
     [],
   )
 
-  /** Per-character settings key for a cell of an upload (ligature boxes count as Regular "characters"). */
+  /** Per-character settings key for a cell of an upload (ligature boxes count as "characters" of their sheet's style). */
   const keyFor = (u: Pick<Upload, 'slot' | 'ligatureSheet'> | undefined, cellIndex: number): string | null => {
     if (!u) return null
-    if (u.ligatureSheet !== null) return overrideKey('regular', ligatureKey(u.ligatureSheet, cellIndex))
+    if (u.ligatureSheet !== null) return overrideKey(ligatureSheetStyle(u.ligatureSheet), ligatureKey(u.ligatureSheet, cellIndex))
     const ch = u.slot ? charAt(u.slot.page, cellIndex) : undefined
     return u.slot && ch ? overrideKey(u.slot.style, ch) : null
   }
@@ -226,17 +228,20 @@ export function useProject(): ProjectState {
 
   /** Bring every adjusted box of a ligature sheet up to date. */
   const applyLigatureOverrides = (key: number, sheet: number) => {
-    const prefix = overrideKey('regular', `lig:${sheet}:`)
+    const prefix = overrideKey(ligatureSheetStyle(sheet), `lig:${sheet}:`)
     for (const k of customizedKeys()) {
       if (k.startsWith(prefix)) void retrace(key, [Number(k.slice(prefix.length))], settingsFor(k))
     }
   }
 
-  /** A page arrived: clear redo marks for the characters it contains. */
-  const clearRedoFor = (slot: Slot, scan: PageScan) =>
+  /** A page arrived: clear redo marks for the characters (or ligature boxes) written on it. */
+  const clearRedoFor = (slot: Slot | null, sheet: number | null, scan: PageScan) =>
     setRedo((r) => {
       const next = new Set(r)
-      for (const i of charCells(slot.page)) if (!scan.cells[i].empty) next.delete(overrideKey(slot.style, charAt(slot.page, i)!))
+      if (slot) for (const i of charCells(slot.page)) if (!scan.cells[i].empty) next.delete(overrideKey(slot.style, charAt(slot.page, i)!))
+      if (sheet !== null) {
+        for (const c of scan.cells) if (!c.empty) next.delete(overrideKey(ligatureSheetStyle(sheet), ligatureKey(sheet, c.index)))
+      }
       return next.size === r.size ? r : next
     })
 
@@ -253,11 +258,11 @@ export function useProject(): ProjectState {
             setScans((m) => new Map(m).set(key, scan))
             const id = scan.pageId
             const detected = id && id.version === TEMPLATE_VERSION && scan.idConfidence >= MIN_ID_CONFIDENCE ? slotOf(id.pageIndex) : null
-            const sheet = id && id.version === TEMPLATE_VERSION && scan.idConfidence >= MIN_ID_CONFIDENCE ? ligatureSheetOf(id.pageIndex) : null
+            const sheet = id && id.version === TEMPLATE_VERSION && scan.idConfidence >= MIN_ID_CONFIDENCE ? ligatureSheetOf(id.pageIndex, id.ext) : null
             const slot = sheet !== null ? null : (detected ?? opts.pickedSlot ?? null)
             updateUpload(key, { status: 'done', slot, ligatureSheet: sheet, needsPagePick: sheet === null && !detected })
             // A restored project already has the right redo marks.
-            if (slot && !opts.restoring) clearRedoFor(slot, scan)
+            if ((slot || sheet !== null) && !opts.restoring) clearRedoFor(slot, sheet, scan)
             // Once that state has rendered, catch up on settings changed meanwhile and per-letter changes.
             afterRender.current.set(key, () => {
               if (!sameAdjust(adj, ref.current.adjust)) {
@@ -418,7 +423,7 @@ export function useProject(): ProjectState {
       }
     }
     const ligatureSheets = new Map<number, PageScan>()
-    for (let sheet = 0; sheet <= BLANK_SHEETS; sheet++) {
+    for (const sheet of ALL_LIGATURE_SHEETS) {
       const list = uploads
         .filter((u) => u.status === 'done' && u.ligatureSheet === sheet && scans.has(u.key))
         .map((u) => ({ key: u.key, scan: scans.get(u.key)! }))
@@ -446,9 +451,14 @@ export function useProject(): ProjectState {
 
   // ------------------------------------------------ Bold from Regular -------
 
-  // Re-trace the Regular pages with thicker strokes whenever anything that feeds them changes (debounced).
+  // Re-trace the Regular pages (and Regular ligature sheets) with thicker strokes whenever anything that feeds them changes (debounced).
   useEffect(() => {
-    const regular = uploads.filter((u) => u.status === 'done' && u.slot?.style === 'regular' && scans.has(u.key))
+    const regular = uploads.filter(
+      (u) =>
+        u.status === 'done' &&
+        (u.slot?.style === 'regular' || (u.ligatureSheet !== null && ligatureSheetStyle(u.ligatureSheet) === 'regular')) &&
+        scans.has(u.key),
+    )
     const regOverrides = Object.entries(overrides).filter(([k]) => k.startsWith('regular:'))
     const regCrops = Object.entries(crops).filter(([k]) => k.startsWith('regular:'))
     const sig = JSON.stringify([generate.bold, generate.boldAmount, regular.map((u) => u.key), adjust, regOverrides, regCrops])
@@ -463,10 +473,11 @@ export function useProject(): ProjectState {
       try {
         for (const u of regular) {
           const scan = ref.current.scans.get(u.key)
-          if (!scan || !u.slot) continue
+          if (!scan || (!u.slot && u.ligatureSheet === null)) continue
+          const boxes = u.slot ? charCells(u.slot.page) : ligatureBoxes(u.ligatureSheet!).map((b) => b.index).filter((i) => !scan.cells[i]?.empty)
           // Group cells by the settings they use, so each group is one worker request.
           const groups = new Map<string, { adj: InkAdjust; cells: number[] }>()
-          for (const i of charCells(u.slot.page)) {
+          for (const i of boxes) {
             const a = wanted(u, i)
             const g = groups.get(JSON.stringify(a)) ?? { adj: a, cells: [] }
             g.cells.push(i)
@@ -500,6 +511,19 @@ export function useProject(): ProjectState {
     }
     return pages.size ? assembleGlyphs(pages, 'regular') : null
   }, [uploads, boldScans, generate.bold])
+
+  const boldLigatures = useMemo(() => {
+    if (!generate.bold) return null
+    const sheets = new Map<number, PageScan>()
+    for (const sheet of ALL_LIGATURE_SHEETS.filter((s) => ligatureSheetStyle(s) === 'regular')) {
+      const list = uploads
+        .filter((u) => u.status === 'done' && u.ligatureSheet === sheet && boldScans.has(u.key))
+        .map((u) => ({ key: u.key, scan: boldScans.get(u.key)! }))
+      const m = mergeUploads(-1, list, () => true)
+      if (m) sheets.set(sheet, m.scan)
+    }
+    return sheets.size ? assembleLigatures(sheets, ligatureSettings) : null
+  }, [uploads, boldScans, generate.bold, ligatureSettings])
 
   const written = useMemo<GlyphsByStyle>(() => {
     const out = emptyByStyle()
@@ -593,6 +617,7 @@ export function useProject(): ProjectState {
 
   return {
     ligatures,
+    boldLigatures,
     ligatureSheetsUploaded,
     setLigatureText,
     setLigatureFeature,

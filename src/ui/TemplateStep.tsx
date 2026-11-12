@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { CHARSET, TEMPLATE_PAGES } from '../core/template/charset'
 import type { TemplateSheet } from '../core/template/generatePdf'
 import { PAGE_SIZES, TEMPLATE_VERSION, type PageSizeId } from '../core/template/layout'
-import { BLANK_SHEETS, COMMON_SHEET } from '../core/template/ligatures'
+import type { LigatureGlyph } from '../core/project'
+import { BLANK_SHEETS, COMMON_SHEET, ligatureSheetId, ligatureSheetName } from '../core/template/ligatures'
 import { STYLES, styleInfo, type StyleId } from '../core/template/styles'
 import { downloadBlob } from './fontFace'
 import { loadOnDemand, StalePageError } from './lazy'
@@ -13,8 +14,23 @@ interface Props {
   /** Characters marked for redo, as "style:char". */
   redo: Set<string>
   onClearRedo: () => void
-  /** Ligature sheets already uploaded (0 = common, 1–7 = blank). */
+  /** Ligature sheets already uploaded, by sheet id (style × 8 + n). */
   ligatureSheetsUploaded: Set<number>
+  /** Uploaded ligature boxes, to name marked boxes by their text. */
+  ligatures: LigatureGlyph[]
+}
+
+/** Marked ligature boxes ("style:lig:sheet:box"), grouped by sheet id. */
+function ligatureRedo(redo: Set<string>): { sheet: number; boxes: number[] }[] {
+  const bySheet = new Map<number, number[]>()
+  for (const k of redo) {
+    const m = /^[A-Za-z]+:lig:(\d+):(\d+)$/.exec(k)
+    if (!m) continue
+    const list = bySheet.get(Number(m[1])) ?? []
+    list.push(Number(m[2]))
+    bySheet.set(Number(m[1]), list)
+  }
+  return [...bySheet].sort(([a], [b]) => a - b).map(([sheet, boxes]) => ({ sheet, boxes: boxes.sort((a, b) => a - b) }))
 }
 
 /** Marked characters grouped by style, in charset order. */
@@ -24,9 +40,12 @@ function redoByStyle(redo: Set<string>): { style: StyleId; chars: string[] }[] {
   )
 }
 
-export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Props) {
-  const firstFreeBlank = Array.from({ length: BLANK_SHEETS }, (_, i) => i + 1).find((n) => !ligatureSheetsUploaded.has(n)) ?? 1
+export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded, ligatures }: Props) {
+  const [ligStyle, setLigStyle] = useState<StyleId>('regular')
+  const firstFreeBlank =
+    Array.from({ length: BLANK_SHEETS }, (_, i) => i + 1).find((n) => !ligatureSheetsUploaded.has(ligatureSheetId('regular', n))) ?? 1
   const [blankSheet, setBlankSheet] = useState(firstFreeBlank)
+  const ligSuffix = ligStyle === 'regular' ? '' : `-${ligStyle}`
   const [size, setSize] = useState<PageSizeId>('letter')
   const [style, setStyle] = useState<StyleId>('regular')
   const [extra, setExtra] = useState('')
@@ -63,6 +82,11 @@ export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Prop
   }
 
   const marked = redoByStyle(redo)
+  const markedLigatures = ligatureRedo(redo)
+  const boxName = (sheet: number, box: number) => {
+    const text = ligatures.find((g) => g.sheet === sheet && g.box === box)?.text.trim()
+    return text ? `${box + 1} (${text})` : String(box + 1)
+  }
   const typed = [...new Set([...extra].filter((ch) => KNOWN.has(ch)))]
   const unknown = [...new Set([...extra].filter((ch) => ch.trim() && !KNOWN.has(ch)))]
   const redoSheets: TemplateSheet[] = [...marked.map((g) => ({ style: g.style, only: g.chars }))]
@@ -71,6 +95,7 @@ export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Prop
     if (existing) existing.only = [...new Set([...existing.only!, ...typed])]
     else redoSheets.push({ style: extraStyle, only: typed })
   }
+  redoSheets.push(...markedLigatures.map((g) => ({ ligatureSheet: g.sheet, boxes: g.boxes })))
   const setName = style === 'regular' ? 'handwriting-template' : `handwriting-template-${style}`
 
   return (
@@ -135,13 +160,19 @@ export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Prop
         <article className="card">
           <h3>Redo sheet</h3>
           <p className="note">Rewrite a few characters without redoing the whole page. Mark them in step 3, or type them here.</p>
-          {marked.length > 0 && (
+          {(marked.length > 0 || markedLigatures.length > 0) && (
             <p data-testid="redo-marked">
               Marked:{' '}
               {marked.map((g) => (
                 <span key={g.style} className="redo-group">
                   {g.style !== 'regular' && <b>{styleInfo(g.style).label}: </b>}
                   <span className="redo-chars">{g.chars.join(' ')}</span>
+                </span>
+              ))}
+              {markedLigatures.map((g) => (
+                <span key={`lig${g.sheet}`} className="redo-group" data-testid="redo-marked-ligatures">
+                  <b>{ligatureSheetName(g.sheet)}: </b>
+                  box {g.boxes.map((b) => boxName(g.sheet, b)).join(', ')}
                 </span>
               ))}
               <button className="link" onClick={onClearRedo}>
@@ -173,8 +204,28 @@ export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Prop
             Joined letters like <i>th</i>, <i>oo</i> or <i>ing</i>, and letters that change shape next to others (an{' '}
             <i>e</i> after <i>r</i>).
           </p>
+          <label>
+            Style{' '}
+            <select value={ligStyle} onChange={(e) => setLigStyle(e.target.value as StyleId)} aria-label="Style for ligature sheets">
+              {STYLES.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {ligStyle !== 'regular' && (
+            <p className="note">
+              Optional: without it, {styleInfo(ligStyle).label} ligatures are generated from your Regular ones when that
+              style is generated too.
+            </p>
+          )}
           <div className="row">
-            <button className="secondary" onClick={() => download([{ ligatureSheet: COMMON_SHEET }], 'handwriting-ligatures-common')} disabled={busy}>
+            <button
+              className="secondary"
+              onClick={() => download([{ ligatureSheet: ligatureSheetId(ligStyle, COMMON_SHEET) }], `handwriting-ligatures${ligSuffix}-common`)}
+              disabled={busy}
+            >
               Common ligatures
             </button>
           </div>
@@ -183,11 +234,15 @@ export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Prop
               {Array.from({ length: BLANK_SHEETS }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
                   Blank sheet {n}
-                  {ligatureSheetsUploaded.has(n) ? ' (uploaded)' : ''}
+                  {ligatureSheetsUploaded.has(ligatureSheetId(ligStyle, n)) ? ' (uploaded)' : ''}
                 </option>
               ))}
             </select>
-            <button className="secondary" onClick={() => download([{ ligatureSheet: blankSheet }], `handwriting-ligatures-blank-${blankSheet}`)} disabled={busy}>
+            <button
+              className="secondary"
+              onClick={() => download([{ ligatureSheet: ligatureSheetId(ligStyle, blankSheet) }], `handwriting-ligatures${ligSuffix}-blank-${blankSheet}`)}
+              disabled={busy}
+            >
               Download
             </button>
           </div>
@@ -204,8 +259,8 @@ export function TemplateStep({ redo, onClearRedo, ligatureSheetsUploaded }: Prop
       <h3 className="tips-head">Filling it in</h3>
       <ul className="instructions">
         <li>
-          Print <b>in color at 100% / Actual size</b>. The blue lines are guides the scanner ignores; gray lines just
-          organize the page.
+          Print at <b>100% / Actual size</b>, in color if you can. The blue lines are guides the scanner ignores; gray
+          lines just organize the page. Black-and-white printing works too, but color reads most reliably.
         </li>
         <li>
           Use a <b>black felt-tip pen</b>, and sit each character on the <b>solid blue baseline</b>.

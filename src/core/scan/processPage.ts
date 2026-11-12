@@ -51,7 +51,7 @@ export function processPage(
   const id = readPageId(canonical)
   onStage('cells')
   // Ligature sheets have their own box layout; everything else is a letter page.
-  const sheet = id.id ? ligatureSheetOf(id.id.pageIndex) : null
+  const sheet = id.id ? ligatureSheetOf(id.id.pageIndex, id.id.ext) : null
   const cells =
     sheet !== null
       ? ligatureBoxes(sheet).map((b) => extractBox(canonical, ligatureBoxGeometry(b), settings.cells))

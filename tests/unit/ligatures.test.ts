@@ -2,17 +2,20 @@ import { describe, expect, it } from 'vitest'
 import { parse } from 'opentype.js'
 import { buildFont } from '../../src/core/font/build'
 import { DEFAULT_SPACING } from '../../src/core/font/metrics'
-import { assembleLigatures, buildProjectFont, DEFAULT_FONT_SETTINGS, ligatureKey, ligatureReady } from '../../src/core/project'
+import { assembleLigatures, buildProjectFont, DEFAULT_FONT_SETTINGS, DEFAULT_GENERATE, ligatureKey, ligatureReady, ligaturesForStyle } from '../../src/core/project'
 import type { CellResult } from '../../src/core/scan/cells'
 import { processPage, type PageScan } from '../../src/core/scan/processPage'
-import { BOX, GRID, ID_SQUARES, MARKERS, type Rect } from '../../src/core/template/layout'
+import { BOX, GRID, ID_EXT_SQUARES, ID_SQUARES, MARKERS, type Rect } from '../../src/core/template/layout'
 import {
   BLANK_SHEETS,
   COMMON_LIGATURES,
   COMMON_SHEET,
   ligatureBoxes,
   ligatureBoxGeometry,
+  ligatureSheetId,
+  ligatureSheetName,
   ligatureSheetOf,
+  ligatureSheetStyle,
   pageIndexOfLigatureSheet,
   parseLigatureText,
 } from '../../src/core/template/ligatures'
@@ -45,12 +48,38 @@ describe('ligature sheets', () => {
     expect(pageIndexOfLigatureSheet(BLANK_SHEETS)).toBe(15)
   })
 
+  it('gives each style its own sheet ids, keeping Regular ids as before', () => {
+    expect(ligatureSheetId('regular', 3)).toBe(3)
+    expect(ligatureSheetOf(pageIndexOfLigatureSheet(COMMON_SHEET), 2)).toBe(ligatureSheetId('italic', COMMON_SHEET))
+    expect(ligatureSheetStyle(ligatureSheetId('boldItalic', 5))).toBe('boldItalic')
+    expect(pageIndexOfLigatureSheet(ligatureSheetId('italic', 5))).toBe(13)
+    expect(ligatureSheetName(ligatureSheetId('italic', COMMON_SHEET))).toBe('Italic common ligatures sheet')
+    expect(ligatureSheetName(2)).toBe('Blank ligature sheet 2')
+    expect(ligatureBoxes(ligatureSheetId('bold', COMMON_SHEET))).toBe(ligatureBoxes(COMMON_SHEET))
+  })
+
+  it('keeps the extension squares clear of the markers and the ID strip', () => {
+    for (const e of ID_EXT_SQUARES) {
+      for (const m of [...Object.values(MARKERS), ...ID_SQUARES]) expect(overlaps(e, m)).toBe(false)
+    }
+  })
+
+  it('reads the style of an Italic sheet, and an old sheet (no squares) as Regular', () => {
+    const ink = { cell: 0, top: 480, bottom: 0, writing: ligatureBoxGeometry(ligatureBoxes(1)[0]).writing }
+    const italic = processPage(photograph(renderPage(pageIndexOfLigatureSheet(1), 150, [ink], 0.6, 2), { rotate: -4, seed: 3 }))
+    expect(italic.pageId).toEqual({ version: 1, pageIndex: pageIndexOfLigatureSheet(1), ext: 2 })
+    expect(ligatureSheetOf(italic.pageId!.pageIndex, italic.pageId!.ext)).toBe(ligatureSheetId('italic', 1))
+    expect(italic.idConfidence).toBeGreaterThan(0.5)
+    const old = processPage(photograph(renderPage(pageIndexOfLigatureSheet(1), 150, [ink]), { rotate: 2, seed: 4 }))
+    expect(old.pageId?.ext).toBe(0)
+  })
+
   it('lays boxes inside the grid without overlaps', () => {
     for (const sheet of [COMMON_SHEET, 1]) {
       const geoms = ligatureBoxes(sheet).map(ligatureBoxGeometry)
       for (const [i, g] of geoms.entries()) {
         expect(g.cell.x + g.cell.w).toBeLessThanOrEqual(GRID.x + GRID.width + 1e-6)
-        for (const m of [...Object.values(MARKERS), ...ID_SQUARES]) expect(overlaps(g.cell, m)).toBe(false)
+        for (const m of [...Object.values(MARKERS), ...ID_SQUARES, ...ID_EXT_SQUARES]) expect(overlaps(g.cell, m)).toBe(false)
         for (const h of geoms.slice(i + 1)) expect(overlaps(g.cell, h.cell)).toBe(false)
         expect(g.cell.y + g.cell.h).toBeLessThanOrEqual(BOX.height)
       }
@@ -169,5 +198,58 @@ describe('assembling ligatures', () => {
     expect(font.tables.gsub).toBeUndefined()
     const names = Array.from({ length: font.glyphs.length }, (_, i) => font.glyphs.get(i).name)
     expect(names).toEqual(expect.arrayContaining(['t_h', 'e.alt1']))
+  })
+})
+
+describe('ligatures per style', () => {
+  const texts = { [ligatureKey(1, 0)]: 'r[e]', [ligatureKey(1, 1)]: 'w[e]', [ligatureKey(1, 14)]: 'th' }
+  const regular = () => assembleLigatures(new Map([[1, ligatureScan(1, [0, 1, 14])]]), { texts, features: {} })
+  const italicSheet = ligatureSheetId('italic', 1)
+  const withItalic = () =>
+    assembleLigatures(new Map([[1, ligatureScan(1, [0, 1, 14])], [italicSheet, ligatureScan(italicSheet, [1])]]), {
+      texts: { ...texts, [ligatureKey(italicSheet, 1)]: 'w[e]' },
+      features: {},
+    })
+  const names = (list: { info: { glyphName: string } }[]) => list.map((g) => g.info.glyphName).sort()
+  const none = new Set<never>()
+
+  it('Regular uses only Regular sheets', () => {
+    expect(names(ligaturesForStyle('regular', withItalic(), none, DEFAULT_GENERATE))).toEqual(['e.alt1', 'e.alt2', 't_h'])
+  })
+
+  it('a generated Bold gets the thickened Regular ligatures, and Bold Italic slants them', () => {
+    const thick = regular()
+    const bold = ligaturesForStyle('bold', regular(), none, DEFAULT_GENERATE, thick)
+    expect(bold.map((g) => [g.style, g.generated])).toEqual([
+      ['bold', 'thickened'],
+      ['bold', 'thickened'],
+      ['bold', 'thickened'],
+    ])
+    expect(bold[0].outline).toBe(thick[0].outline)
+    const bi = ligaturesForStyle('boldItalic', regular(), none, DEFAULT_GENERATE, thick)
+    expect(bi.every((g) => g.style === 'boldItalic' && g.generated === 'thickened and slanted')).toBe(true)
+  })
+
+  it('no generated Bold ligatures when Bold letters are written or Bold generation is off', () => {
+    expect(ligaturesForStyle('bold', regular(), new Set(['bold'] as const), DEFAULT_GENERATE, regular())).toEqual([])
+    expect(ligaturesForStyle('bold', regular(), none, { ...DEFAULT_GENERATE, bold: false }, regular())).toEqual([])
+  })
+
+  it('a written Italic box wins over the slanted Regular one, and alternate names stay unique', () => {
+    const italic = ligaturesForStyle('italic', withItalic(), none, DEFAULT_GENERATE)
+    const w = italic.find((g) => g.text === 'w[e]')!
+    expect(w.sheet).toBe(italicSheet)
+    expect(w.generated).toBeUndefined()
+    expect(italic.find((g) => g.text === 'r[e]')!.generated).toBe('slanted')
+    expect(names(italic)).toEqual(['e.alt1', 'e.alt2', 't_h'])
+    // The Italic font builds with both alternates.
+    const font = parse(buildProjectFont([], DEFAULT_FONT_SETTINGS, undefined, 'italic', 12, {}, italic).buffer)
+    const glyphNames = Array.from({ length: font.glyphs.length }, (_, i) => font.glyphs.get(i).name)
+    expect(glyphNames).toEqual(expect.arrayContaining(['e.alt1', 'e.alt2', 't_h']))
+  })
+
+  it('written Italic letters get only written Italic ligatures', () => {
+    const italic = ligaturesForStyle('italic', withItalic(), new Set(['italic'] as const), DEFAULT_GENERATE)
+    expect(italic.map((g) => g.text)).toEqual(['w[e]'])
   })
 })
